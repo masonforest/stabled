@@ -1,23 +1,28 @@
-mod db;
+mod address;
+pub mod bitcoin;
+pub mod constants;
+pub mod exchange_rates;
+pub mod db;
 mod error;
 mod transaction;
-mod address;
 
-use crate::error::Error;
-use crate::transaction::Transaction;
-use crate::transaction::Signed;
-use crate::transaction::Signable;
-use axum::body::Bytes;
-use crate::transaction::TokenType;
-use axum::extract::State;
-use axum::response::IntoResponse;
-use axum::routing::get;
+use crate::{
+    error::Error,
+    transaction::{TokenType, Transfer},
+};
 use axum::{
+    body::Bytes,
+    extract::State,
     http::{header, method::Method},
-    routing::post,
+    response::IntoResponse,
+    routing::{get, post},
     Router,
 };
+use std::str::FromStr;
 use borsh::{BorshDeserialize, BorshSerialize};
+#[cfg(test)]
+use k256::ecdsa::SigningKey;
+use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -29,14 +34,14 @@ pub async fn app(pool: PgPool) -> Router {
 
     Router::new()
         .route("/transactions", post(insert_transaction))
-        .route("/accounts/:address", get(get_account))
+        .route("/balances/:token_type/:address", get(get_balance))
         .layer(cors)
         .with_state(pool)
 }
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
-struct Account {
+pub struct Account {
     nonce: i64,
-    balances: Vec<(TokenType, i64)>
+    balances: Vec<(TokenType, i64)>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
@@ -44,79 +49,84 @@ pub struct Borrow {
     pub nonce: i64,
     pub value: i64,
 }
-impl Signable for Borrow {}
-
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
-enum Action{
-    Transact(Signed<Transaction>),
-    Borrow(Signed<Borrow>)
+enum Transaction {
+    Transfer(Transfer),
+}
+impl Transaction {
+    #[cfg(test)]
+    fn sign(&self, signing_key: &SigningKey) -> SignedTransaction {
+        let (signature, recovery_id) = signing_key
+            .sign_recoverable(&borsh::to_vec(&self).unwrap())
+            .unwrap();
+        let signature_bytes: [u8; 65] = [signature.to_bytes().as_slice(), &[recovery_id.to_byte()]]
+            .concat()
+            .try_into()
+            .unwrap();
+        SignedTransaction(self.clone(), signature_bytes)
+    }
+}
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
+pub struct SignedTransaction(Transaction, pub [u8; 65]);
+
+impl SignedTransaction {
+    pub fn from_address(&self) -> [u8; 33] {
+        let s: [u8; 64] = self.1[0..64].try_into().unwrap();
+        let signature = Signature::from_bytes(&s.into()).unwrap();
+        let recovery_id = RecoveryId::from_byte(self.1[64]).unwrap();
+        VerifyingKey::recover_from_msg(&borsh::to_vec(&self.0).unwrap(), &signature, recovery_id)
+            .unwrap()
+            .to_sec1_bytes()
+            .to_vec()
+            .try_into()
+            .unwrap()
+    }
 }
 
 pub async fn insert_transaction(
     State(pool): State<PgPool>,
     body: Bytes,
 ) -> axum::response::Result<impl IntoResponse> {
-    let action = borsh::from_slice(&body.to_vec()).map_err(Error::from)?; 
-
-    match action {
-        Action::Transact(transaction) => 
-        db::insert_transaction(
-        &pool,
-        transaction,
-    ).await?,
-        Action::Borrow(borrow) => db::borrow(
-        &pool,
-        borrow,
-    ).await?
-    
-    }
+    let transaction = borsh::from_slice(&body.to_vec()).map_err(Error::from)?;
+    db::insert_transaction(&pool, transaction).await?;
     Ok(vec![])
 }
 
 
-impl IntoResponse for Account {
-    fn into_response(self) -> axum::response::Response {
-        borsh::to_vec(&self).map_err(Error::from).into_response()
-    }
-}
 
-async fn get_account(
+async fn get_balance(
     State(pool): State<PgPool>,
-    axum::extract::Path(address): axum::extract::Path<String>,
+    axum::extract::Path((token_type, address)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Result<impl IntoResponse> {
-    Ok(db::get_account(&pool, address::from_str(&address)?).await?)
+    Ok(borsh::to_vec(&db::get_balance(&pool, hex::decode(&address).map_err(Error::from)?.try_into().map_err(Error::from)?, TokenType::from_str(&token_type)?).await?).map_err(Error::from).into_response())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::TokenType;
-    use crate::transaction::Transaction;
+    use crate::transaction::{TokenType, Transfer};
     use axum::{
         body::Body,
-        http::Request,
-        http::StatusCode
+        http::{Request, StatusCode},
     };
     use borsh::from_slice;
     use http_body_util::BodyExt;
-    use k256::ecdsa::SigningKey;
-    use k256::ecdsa::VerifyingKey;
-    use crate::transaction::Signable;
+    use k256::ecdsa::{SigningKey, VerifyingKey};
     use lazy_static::lazy_static;
     use secp256k1::rand::rngs::OsRng;
     use sqlx::PgPool;
     use tower::ServiceExt;
 
     lazy_static! {
-        static ref ALICES_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
-        static ref ALICE: [u8; 33] = VerifyingKey::from(ALICES_SECRET_KEY.clone())
+        pub static ref ALICES_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
+        pub static ref ALICE: [u8; 33] = VerifyingKey::from(ALICES_SECRET_KEY.clone())
             .to_sec1_bytes()
             .to_vec()
             .try_into()
             .unwrap();
-        static ref BOBS_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
-        static ref BOB: [u8; 33] = VerifyingKey::from(BOBS_SECRET_KEY.clone())
+        pub static ref BOBS_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
+        pub static ref BOB: [u8; 33] = VerifyingKey::from(BOBS_SECRET_KEY.clone())
             .to_sec1_bytes()
             .to_vec()
             .try_into()
@@ -125,20 +135,21 @@ mod tests {
 
     #[sqlx::test]
     async fn transfer(pool: PgPool) {
-        db::deposit(&pool, *ALICE, TokenType::Usd, 10000).await.unwrap();
-        let transaction = Transaction {
+        db::credit(&pool, *ALICE, TokenType::Usd, 10000)
+            .await
+            .unwrap();
+        let transaction = Transaction::Transfer(Transfer {
             nonce: 0,
             token_type: TokenType::Usd,
             to: *BOB,
             value: 10000,
-        };
+        });
         let signed_transaction = transaction.sign(&ALICES_SECRET_KEY.clone());
-
         let request = Request::builder()
             .method("POST")
             .header("content-type", "application/octet-stream")
             .uri("/transactions")
-            .body(Body::from(borsh::to_vec(&Action::Transact(signed_transaction)).unwrap()))
+            .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
             .unwrap();
 
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
@@ -147,7 +158,7 @@ mod tests {
 
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/accounts/{}", address::to_str(*ALICE)))
+            .uri(format!("/balances/usd/{}", hex::encode(*ALICE)))
             .body(Body::empty())
             .unwrap();
 
@@ -156,52 +167,12 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        let account = from_slice::<Account>(&body).unwrap();
 
-        assert_eq!(account.balances[0].1, 0);
-        
-        let request = Request::builder()
-            .method("GET")
-            .uri(format!("/accounts/{}", address::to_str(*BOB)))
-            .body(Body::empty())
-            .unwrap();
-
-        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let account = from_slice::<Account>(&body).unwrap();
-
-        assert_eq!(account.balances[0].1, 10000);
-    }
-
-    #[sqlx::test]
-    async fn borrow(pool: PgPool) {
-        let borrow = Borrow {
-            nonce: 0,
-            value: 10000,
-        };
-        let signed_borrow = borrow.sign(&ALICES_SECRET_KEY.clone());
-
-        let request = Request::builder()
-            .method("POST")
-            .header("content-type", "application/octet-stream")
-            .uri("/transactions")
-            .body(Body::from(borsh::to_vec(&Action::Borrow(signed_borrow)).unwrap()))
-            .unwrap();
-
-        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        println!("{}", std::str::from_utf8(&body).unwrap());
-
-
-        // assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(from_slice::<i64>(&body).unwrap(), 0);
 
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/accounts/{}", address::to_str(*ALICE)))
+            .uri(format!("/balances/usd/{}", hex::encode(*BOB)))
             .body(Body::empty())
             .unwrap();
 
@@ -210,9 +181,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        let account = from_slice::<Account>(&body).unwrap();
 
-        assert_eq!(account.balances[0].1, 10000);
+        assert_eq!(from_slice::<i64>(&body).unwrap(), 10000);
     }
 }
-

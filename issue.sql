@@ -1,0 +1,1 @@
+insert into ledger (token_type, payor_id, recipient_id, value) values ('usd', system_address(), account_id('\x0251eaa172d52c30f9c389009dd907a13f64057908fe3c4b71106d1e59627c0b31'), 10000);

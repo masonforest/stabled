@@ -1,5 +1,7 @@
-use axum::response::{IntoResponse, Response};
-use axum::http::StatusCode;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use std::convert::Infallible;
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -18,10 +20,7 @@ pub enum Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            self.to_string(),
-        ).into_response()
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
@@ -50,6 +49,18 @@ impl From<Vec<u8>> for Error {
 
 impl From<base64::DecodeError> for Error {
     fn from(err: base64::DecodeError) -> Self {
+        Error::Error(err.to_string())
+    }
+}
+
+impl From<hex::FromHexError> for Error {
+    fn from(err: hex::FromHexError) -> Self {
+        Error::Error(err.to_string())
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
         Error::Error(err.to_string())
     }
 }
