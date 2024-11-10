@@ -1,8 +1,6 @@
-use crate::error::Result;
+use crate::{constants::COIN_MARKET_CAP_KEY, error::Result};
 use reqwest::Client;
 use serde_json::Value;
-use std::error::Error;
-use crate::constants::COIN_MARKET_CAP_KEY;
 
 pub async fn bitcoin() -> Result<i64> {
     // Create an HTTP client
@@ -21,11 +19,27 @@ pub async fn bitcoin() -> Result<i64> {
             // Parse the JSON response
             let json: Value = resp.json().await?;
             // Print the JSON data
-            println!("{:#}", json.get("data").expect("data").get("BTC").expect("BTC")[0].get("quote").expect("quote").get("USD").expect("USD").get("price").expect("price"));
-            Ok((json.get("data").expect("data").get("BTC").expect("BTC")[0].get("quote").expect("quote").get("USD").expect("USD").get("price").expect("price").as_f64().expect("not f64")  * 100.00) as i64)
+            println!(
+                "{:#}",
+                json.get("data").expect("data").get("BTC").expect("BTC")[0]
+                    .get("quote")
+                    .expect("quote")
+                    .get("USD")
+                    .expect("USD")
+                    .get("price")
+                    .expect("price")
+            );
+            Ok((json.get("data").expect("data").get("BTC").expect("BTC")[0]
+                .get("quote")
+                .expect("quote")
+                .get("USD")
+                .expect("USD")
+                .get("price")
+                .expect("price")
+                .as_f64()
+                .expect("not f64")
+                * 100.00) as i64)
         }
-        Err(e) => {
-            Err(e.into())
-        }
+        Err(e) => Err(e.into()),
     }
 }

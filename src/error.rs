@@ -59,6 +59,11 @@ impl From<hex::FromHexError> for Error {
     }
 }
 
+impl From<bitcoin::address::ParseError> for Error {
+    fn from(err: bitcoin::address::ParseError) -> Self {
+        Error::Error(err.to_string())
+    }
+}
 impl From<reqwest::Error> for Error {
     fn from(err: reqwest::Error) -> Self {
         Error::Error(err.to_string())

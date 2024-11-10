@@ -1,14 +1,16 @@
 use bitcoin::{key::Secp256k1, Address, Network, PrivateKey, PublicKey};
 use dotenv::dotenv;
+use rust_decimal::Decimal;
 use rustls_acme::{caches::DirCache, AcmeConfig};
 use serde_json::json;
+use tokio::spawn;
 use sqlx::postgres::PgPoolOptions;
 use stable::{
     bitcoin::rpc,
     constants::{Env, ENV, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT},
     db,
 };
-use std::{env, net::Ipv6Addr, path::PathBuf};
+use std::{env, net::Ipv6Addr, path::PathBuf, str::FromStr};
 use tokio_stream::StreamExt;
 
 #[tokio::main]
@@ -44,12 +46,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // )
     //     .await
     //     .unwrap();
-    // spawn({
-    //     let pool = pool.clone();
-    //     async move {
-    //         stable::bitcoin::poller::run(pool).await;
-    //     }
-    // });
+    spawn({
+        let pool = pool.clone();
+        async move {
+            stable::bitcoin::poller::run(pool).await;
+        }
+    });
+    // println!("{}", Decimal::new(1000, 8));
+    // println!(
+    //     "{:?}",
+    //     stable::bitcoin::rpc::send_to_address(
+    //         bitcoin::Address::from_str("36sTjLr6VTRfF5MQGTH3BVVeDH17aEwQQW")
+    //             .unwrap()
+    //             .require_network(Network::Bitcoin)
+    //             .unwrap(),
+    //         1000
+    //     )
+    //     .await
+    // );
     let addr = (Ipv6Addr::UNSPECIFIED, *PORT);
     if matches!(*ENV, Env::Production) {
         let mut state = AcmeConfig::new(LETS_ENCRYPT_DOMAINS.clone())

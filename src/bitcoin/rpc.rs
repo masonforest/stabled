@@ -1,6 +1,8 @@
 use self::super::Block;
 use crate::bitcoin::Deposit;
 use bitcoin::{consensus::Decodable, Network};
+use rust_decimal::Decimal;
+use log::info;
 use serde_json::{json, Value};
 use std::env;
 use tokio::sync::OnceCell;
@@ -43,6 +45,41 @@ pub async fn get_network() -> &'static Network {
             }
         })
         .await
+}
+
+pub async fn send_to_address(address: bitcoin::Address, value: i64) -> [u8; 32] {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(env::var("BITCOIND_URL").unwrap())
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("text/plain"),
+        )
+        .json(&
+            json!({
+                    "jsonrpc": "1.0",
+                    "method": "sendtoaddress",
+                    "params": [
+                        address.to_string(),
+                        Decimal::new(value, 8)
+                    ]
+        })
+    )
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    info!("Bitcoin RPC Response {:?}", resp);
+    resp.get("result")
+        .map(|result| {
+            hex::decode(result.as_str().unwrap())
+                .unwrap()
+                .try_into()
+                .unwrap()
+        })
+        .unwrap()
 }
 
 pub async fn get_best_block_hash() -> [u8; 32] {
@@ -162,9 +199,6 @@ pub fn decode_deposits(
         })
         .filter_map(
             |(txid, output, input): (bitcoin::Txid, bitcoin::TxOut, bitcoin::TxIn)| {
-                println!("here: {:?}", hex::encode(input.witness.nth(1).unwrap()));
-                println!("here: {:?}", hot_wallet_addresses[0].script_pubkey());
-                // println!("here: {:?}", input);
                 if hot_wallet_addresses
                     .into_iter()
                     .map(|address| address.script_pubkey())

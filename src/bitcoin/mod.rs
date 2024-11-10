@@ -18,11 +18,6 @@ pub struct Deposit {
     pub value: i64,
 }
 
-impl Deposit {
-    fn value_in_usd() {
-        
-    }
-}
 
 #[derive(Debug)]
 pub struct Withdrawl {

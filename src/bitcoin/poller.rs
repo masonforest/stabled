@@ -15,8 +15,6 @@ pub async fn run(pool: PgPool) {
 // pub async fn poll(pool: PgPool) {
 // }
 
-
-
 pub async fn poll(pool: PgPool) {
     let current_best_block_hash = db::get_best_block_hash(&pool).await.unwrap();
     let new_best_block_hash = rpc::get_best_block_hash().await;
@@ -27,8 +25,9 @@ pub async fn poll(pool: PgPool) {
             rpc::get_block(
                 new_best_block_hash,
                 db::get_hot_wallets(&pool).await.unwrap(),
-            ).await,
-            exchange_rates::bitcoin().await.unwrap()
+            )
+            .await,
+            exchange_rates::bitcoin().await.unwrap(),
         )
         .await
         .unwrap();

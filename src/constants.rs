@@ -14,9 +14,9 @@ lazy_static! {
         Env::Development
     };
     pub static ref PORT: u16 = env::var("PORT")
-    .ok()
-    .and_then(|port_str| port_str.parse::<u16>().ok())
-    .unwrap_or(80);
+        .ok()
+        .and_then(|port_str| port_str.parse::<u16>().ok())
+        .unwrap_or(80);
     pub static ref PUBLIC_KEY: PublicKey =
         PublicKey::from_private_key(&Secp256k1::new(), &*PRIVATE_KEY);
     pub static ref NODE_ADDRESS: [u8; 33] = (*PUBLIC_KEY).inner.serialize();

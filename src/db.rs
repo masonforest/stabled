@@ -4,7 +4,7 @@ use crate::{
     constants::{NODE_ADDRESS, PUBLIC_IP, PUBLIC_KEY, SYSTEM_ADDRESS},
     error::Result,
     transaction::TokenType,
-    Account, SignedTransaction, Transaction,
+    SignedTransaction, Transaction,
 };
 use bitcoin::Network;
 use log::info;
@@ -34,9 +34,9 @@ pub async fn insert_transaction<'a, E>(pool: E, transaction: SignedTransaction) 
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
-    let (to, nonce, transaction_id) = match transaction.0 {
+    let (account, nonce, transaction_id) = match transaction.0 {
         Transaction::Transfer(ref transfer) => (
-            transfer.to,
+            transaction.from_address(),
             transfer.nonce,
             insert_transfer(
                 pool.clone(),
@@ -47,10 +47,21 @@ where
             )
             .await?,
         ),
+        Transaction::Withdraw(ref transfer) => (
+            transaction.from_address(),
+            transfer.nonce,
+            burn(pool.clone(), transaction.from_address(), transfer.value).await?,
+        ),
     };
-    insert_signature(pool, transaction_id, to, nonce, transaction.1).await?;
+    insert_signature(pool, transaction_id, account, nonce, transaction.1).await?;
 
     Ok(())
+}
+pub async fn burn<'a, E>(pool: E, payor: [u8; 33], value: i64) -> sqlx::Result<i64>
+where
+    E: Executor<'a, Database = Postgres> + Clone,
+{
+    Ok(insert_transfer(pool.clone(), &TokenType::Usd, payor, SYSTEM_ADDRESS, value).await?)
 }
 pub async fn insert_transfer<'a, E>(
     pool: E,
@@ -62,10 +73,6 @@ pub async fn insert_transfer<'a, E>(
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
-    // println!("{}", hex::encode(&payor));
-    // println!("{}", hex::encode(&recipient));
-    // println!("{}", value);
-
     query(
         "INSERT into ledger (token_type, payor_id, recipient_id, value)
         VALUES ($1, account_id($2), account_id($3), $4)
@@ -104,7 +111,11 @@ where
     Ok(())
 }
 
-pub async fn insert_bitcoin_block<'a, E>(pool: E, bitcoin_block: Block, bitcoin_exchange_rate: i64) -> Result<()>
+pub async fn insert_bitcoin_block<'a, E>(
+    pool: E,
+    bitcoin_block: Block,
+    bitcoin_exchange_rate: i64,
+) -> Result<()>
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
@@ -117,11 +128,11 @@ where
             .unwrap()
             .get("id");
     query("INSERT into blocks (bitcoin_block_id, bitcoin_exchange_rate) VALUES ($1, $2)")
-            .bind(bitcoin_block_id)
-            .bind(bitcoin_exchange_rate)
-            .execute(pool.clone())
-            .await
-            .unwrap();
+        .bind(bitcoin_block_id)
+        .bind(bitcoin_exchange_rate)
+        .execute(pool.clone())
+        .await
+        .unwrap();
     for deposit in bitcoin_block.deposits {
         insert_deposit(
             pool.clone(),
@@ -168,13 +179,32 @@ where
     Ok(())
 }
 
-pub fn satoshis_to_cents(
-    satoshis: i64,
-    bitcoin_exchange_rate: i64,
-) -> i64 {
+pub fn satoshis_to_cents(satoshis: i64, bitcoin_exchange_rate: i64) -> i64 {
     satoshis * bitcoin_exchange_rate / 100000
 }
 
+pub fn cents_to_satoshis(cents: i64, bitcoin_exchange_rate: i64) -> i64 {
+    cents * 100000000/ bitcoin_exchange_rate 
+}
+pub async fn current_value_in_satoshis<'a, E>(pool: E, value: i64) -> Result<i64>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let bitcoin_exchange_rate: i64 = query(
+        "SELECT bitcoin_exchange_rate 
+          FROM blocks
+          ORDER BY height DESC 
+          LIMIT 1;",
+    )
+    .fetch_one(pool)
+    .await?
+    .get("bitcoin_exchange_rate");
+
+    Ok(cents_to_satoshis(value, bitcoin_exchange_rate))
+    // .into_iter()
+    // .map(|row| (TokenType::Usd, row.get::<i64, &str>("value")))
+    // .collect(),
+}
 // pub async fn get_account<'a, E>(pool: E, address: Address) -> Result<Account>
 // where
 //     E: Executor<'a, Database = Postgres> + Clone,
@@ -296,18 +326,22 @@ where
     )
 }
 #[cfg(test)]
-pub async fn test_get_balance<'a, E>(pool: E, address: Address, token_type: TokenType) -> Result<i64>
+pub async fn test_get_balance<'a, E>(
+    pool: E,
+    address: Address,
+    token_type: TokenType,
+) -> Result<i64>
 where
     E: Executor<'a, Database = Postgres>,
 {
-    Ok(
-        query("SELECT value FROM balances WHERE account_id = account_id($1) AND token_type = $2 limit 1")
-            .bind(address)
-            .bind(token_type)
-            .fetch_one(pool)
-            .await?
-            .get("value"),
+    Ok(query(
+        "SELECT value FROM balances WHERE account_id = account_id($1) AND token_type = $2 limit 1",
     )
+    .bind(address)
+    .bind(token_type)
+    .fetch_one(pool)
+    .await?
+    .get("value"))
 }
 
 #[cfg(test)]
@@ -328,12 +362,14 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            (70783.11129211668 * 100.0 ) as i64
+            (70783.11129211668 * 100.0) as i64,
         )
         .await
         .unwrap();
 
-        assert_eq!(get_balance(&pool, *ALICE, TokenType::Usd).await.unwrap(), 70783)
-
+        assert_eq!(
+            get_balance(&pool, *ALICE, TokenType::Usd).await.unwrap(),
+            70783
+        )
     }
 }
