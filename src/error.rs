@@ -2,6 +2,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use std::array::TryFromSliceError;
 use std::convert::Infallible;
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -59,6 +60,11 @@ impl From<hex::FromHexError> for Error {
     }
 }
 
+impl From<TryFromSliceError> for Error {
+    fn from(err: TryFromSliceError) -> Self {
+        Error::Error(err.to_string())
+    }
+}
 impl From<bitcoin::address::ParseError> for Error {
     fn from(err: bitcoin::address::ParseError) -> Self {
         Error::Error(err.to_string())

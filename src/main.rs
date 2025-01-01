@@ -1,16 +1,15 @@
 use bitcoin::{key::Secp256k1, Address, Network, PrivateKey, PublicKey};
 use dotenv::dotenv;
-use rust_decimal::Decimal;
+use std::io::Read;
+use bitcoin::consensus::Decodable;
+use stable::transaction::TokenType;
 use rustls_acme::{caches::DirCache, AcmeConfig};
-use serde_json::json;
-use tokio::spawn;
 use sqlx::postgres::PgPoolOptions;
-use stable::{
-    bitcoin::rpc,
-    constants::{Env, ENV, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT},
-    db,
-};
-use std::{env, net::Ipv6Addr, path::PathBuf, str::FromStr};
+use stable::constants::{Env, ENV, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT};
+use std::{env, net::Ipv6Addr, path::PathBuf};
+use tokio::spawn;
+use std::fs::File;
+use std::collections::HashMap;
 use tokio_stream::StreamExt;
 
 #[tokio::main]
@@ -27,18 +26,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let pool = PgPoolOptions::new().connect(&database_url).await?;
     let app = stable::app(pool.clone()).await;
     stable::db::initialize(&pool).await?;
+    stable::db::insert_bitcoin_block(
+        &pool,
+        {
+            let mut file = File::open("src/test_data/deposit-block-877380.block").unwrap();
+            let mut data = Vec::new();
+            file.read_to_end(&mut data).unwrap();
+
+            ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
+        },
+        HashMap::from([(TokenType::Usd, (96628.51 * 1000.0) as u64)]),
+    ).await.unwrap();
     // let block_hash = hex::decode("00000000000000000000a54a5c49d330ccbd050e511c13d62b26dd52f7881067").unwrap().try_into().unwrap();
     // let block = stable::bitcoin::rpc::get_block(block_hash, db::get_hot_wallets(&pool).await?).await;
-    let deposits = rpc::decode_deposits(
-        vec![
-            &json!({"hex": "0200000000010106e8325fa37c8d81ffadea6aead7447f7585b52cf758393ec09cb95dbeaffa950000000000ffffffff01e803000000000000220020ffad8cbc224eaa82f113328ad817b13a4a85ad958c25dd69c73fd99baa3ec8170247304402203bca7874f2b948a9038d2dabbad467369e0de1244fb9e7e9a426f9313590492c0220030dde6d764b9f9621b002211ef7f86da0331bae580912393dbb60f6e8b2e5c801210251eaa172d52c30f9c389009dd907a13f64057908fe3c4b71106d1e59627c0b3100000000"}),
-        ],
-        &db::get_hot_wallets(&pool).await?,
-    );
-    let block = stable::bitcoin::Block {
-        deposits,
-        ..Default::default()
-    };
+    // let deposits = rpc::decode_deposits(
+    //     vec![
+    //         &json!({"hex": "0200000000010106e8325fa37c8d81ffadea6aead7447f7585b52cf758393ec09cb95dbeaffa950000000000ffffffff01e803000000000000220020ffad8cbc224eaa82f113328ad817b13a4a85ad958c25dd69c73fd99baa3ec8170247304402203bca7874f2b948a9038d2dabbad467369e0de1244fb9e7e9a426f9313590492c0220030dde6d764b9f9621b002211ef7f86da0331bae580912393dbb60f6e8b2e5c801210251eaa172d52c30f9c389009dd907a13f64057908fe3c4b71106d1e59627c0b3100000000"}),
+    //     ],
+    //     &db::get_hot_wallets(&pool).await?,
+    // );
+    // let block = stable::bitcoin::Block {
+    //     deposits,
+    //     ..Default::default()
+    // };
     // stable::db::insert_bitcoin_block(
     //     &pool,
     //     block,

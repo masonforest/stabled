@@ -1,3 +1,4 @@
+use crate::Address;
 use bitcoin::key::{PrivateKey, PublicKey, Secp256k1};
 use lazy_static::lazy_static;
 use std::{env, net::IpAddr};
@@ -6,7 +7,7 @@ pub enum Env {
     Production,
     Development,
 }
-pub const SYSTEM_ADDRESS: [u8; 33] = [0; 33];
+pub const SYSTEM_ADDRESS: Address = Address([0; 17]);
 lazy_static! {
     pub static ref ENV: Env = if env::var("ENV").unwrap_or("".to_string()) == "production" {
         Env::Production
@@ -19,7 +20,7 @@ lazy_static! {
         .unwrap_or(80);
     pub static ref PUBLIC_KEY: PublicKey =
         PublicKey::from_private_key(&Secp256k1::new(), &*PRIVATE_KEY);
-    pub static ref NODE_ADDRESS: [u8; 33] = (*PUBLIC_KEY).inner.serialize();
+    pub static ref NODE_ADDRESS: Address = (*PUBLIC_KEY).into();
     static ref PRIVATE_KEY: PrivateKey =
         PrivateKey::from_wif(&env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set")).unwrap();
     pub static ref PUBLIC_IP: IpAddr = env::var("PUBLIC_IP")

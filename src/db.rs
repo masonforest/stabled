@@ -1,14 +1,20 @@
+use crate::address::script_buf_to_address;
 use crate::{
     address::Address,
-    bitcoin::{multi_sig, Block, Deposit},
+    bitcoin::multi_sig,
     constants::{NODE_ADDRESS, PUBLIC_IP, PUBLIC_KEY, SYSTEM_ADDRESS},
     error::Result,
     transaction::TokenType,
     SignedTransaction, Transaction,
 };
+use borsh::BorshSerialize;
+use bitcoin::BlockHash;
 use bitcoin::Network;
+use bitcoin::TxOut;
 use log::info;
 use sqlx::{query, Executor, Postgres, Row};
+use std::collections::HashMap;
+use sqlx::query_as;
 use std::{net::IpAddr, str::FromStr};
 
 #[cfg(test)]
@@ -42,7 +48,7 @@ where
                 pool.clone(),
                 &transfer.token_type,
                 transaction.from_address(),
-                transfer.to,
+                Address(transfer.to),
                 transfer.value,
             )
             .await?,
@@ -57,7 +63,7 @@ where
 
     Ok(())
 }
-pub async fn burn<'a, E>(pool: E, payor: [u8; 33], value: i64) -> sqlx::Result<i64>
+pub async fn burn<'a, E>(pool: E, payor: Address, value: i64) -> sqlx::Result<i64>
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
@@ -66,8 +72,8 @@ where
 pub async fn insert_transfer<'a, E>(
     pool: E,
     token_type: &TokenType,
-    payor: [u8; 33],
-    recipient: [u8; 33],
+    payor: Address,
+    recipient: Address,
     value: i64,
 ) -> sqlx::Result<i64>
 where
@@ -111,114 +117,70 @@ where
     Ok(())
 }
 
-pub async fn insert_bitcoin_block<'a, E>(
-    pool: E,
-    bitcoin_block: Block,
-    bitcoin_exchange_rate: i64,
-) -> Result<()>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    let bitcoin_block_id: i32 =
-        query("INSERT into bitcoin_blocks (hash, height) VALUES ($1, $2) RETURNING id")
-            .bind(bitcoin_block.hash)
-            .bind(bitcoin_block.height)
-            .fetch_one(pool.clone())
-            .await
-            .unwrap()
-            .get("id");
-    query("INSERT into blocks (bitcoin_block_id, bitcoin_exchange_rate) VALUES ($1, $2)")
-        .bind(bitcoin_block_id)
-        .bind(bitcoin_exchange_rate)
-        .execute(pool.clone())
-        .await
-        .unwrap();
-    for deposit in bitcoin_block.deposits {
-        insert_deposit(
-            pool.clone(),
-            bitcoin_block_id,
-            bitcoin_exchange_rate,
-            &deposit,
-        )
-        .await?;
-    }
-    Ok(())
+#[derive(sqlx::FromRow, sqlx::Type, BorshSerialize)]
+pub struct Utxo {
+    transaction_id: Vec<u8>,
+    vout: i32,
+    value: i64,
 }
-
-pub async fn insert_deposit<'a, E>(
+pub async fn redeem_utxo<'a, E>(
     pool: E,
-    bitcoin_block_id: i32,
-    bitcoin_exchange_rate: i64,
-    deposit: &Deposit,
+    address: Address,
+    transaction_id: [u8; 32],
+    vout: i32,
+    token_type: TokenType,
 ) -> Result<()>
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
-    insert_transfer(
-        pool.clone(),
-        &TokenType::Usd,
-        SYSTEM_ADDRESS,
-        *NODE_ADDRESS,
-        satoshis_to_cents(deposit.value, bitcoin_exchange_rate),
+    let maybe_utxo: Option<Utxo> = sqlx::query_as!(
+        Utxo,
+        "UPDATE utxos SET redeemed = true
+        WHERE
+        account_id = account_id($1) AND transaction_id = $2 AND vout = $3 AND redeemed = false
+        RETURNING transaction_id, vout, value",
+        &address.0,
+        &transaction_id,
+        vout
     )
+    .fetch_optional(pool.clone())
     .await?;
-    insert_transfer(
-        pool.clone(),
-        &TokenType::Usd,
-        *NODE_ADDRESS,
-        deposit.depositor,
-        satoshis_to_cents(deposit.value, bitcoin_exchange_rate),
-    )
-    .await?;
-    query("INSERT into deposits (bitcoin_block_id, bitcoin_transaction_hash) VALUES ($1, $2)")
-        .bind(bitcoin_block_id)
-        .bind(deposit.transaction_hash)
+
+    if let Some(utxo) = maybe_utxo {
+        query(
+            "INSERT into ledger (token_type, payor_id, recipient_id, value)
+            VALUES ($1, account_id($2), account_id($3), current_value($1, $4))",
+        )
+        .bind(&token_type)
+        .bind(*NODE_ADDRESS)
+        .bind(address)
+        .bind(utxo.value)
         .execute(pool)
         .await?;
+    } else {
+        return Err(crate::Error::Error(
+            "Utxo doesn't exisit for this address or has already been redeemed".to_string(),
+        ));
+    }
 
     Ok(())
 }
 
-pub fn satoshis_to_cents(satoshis: i64, bitcoin_exchange_rate: i64) -> i64 {
-    satoshis * bitcoin_exchange_rate / 100000
-}
-
-pub fn cents_to_satoshis(cents: i64, bitcoin_exchange_rate: i64) -> i64 {
-    cents * 100000000/ bitcoin_exchange_rate 
-}
-pub async fn current_value_in_satoshis<'a, E>(pool: E, value: i64) -> Result<i64>
+pub async fn current_value_in_satoshis<'a, E>(
+    pool: E,
+    token_type: &TokenType,
+    value: i64,
+) -> Result<i64>
 where
     E: Executor<'a, Database = Postgres>,
 {
-    let bitcoin_exchange_rate: i64 = query(
-        "SELECT bitcoin_exchange_rate 
-          FROM blocks
-          ORDER BY height DESC 
-          LIMIT 1;",
-    )
-    .fetch_one(pool)
-    .await?
-    .get("bitcoin_exchange_rate");
-
-    Ok(cents_to_satoshis(value, bitcoin_exchange_rate))
-    // .into_iter()
-    // .map(|row| (TokenType::Usd, row.get::<i64, &str>("value")))
-    // .collect(),
+    Ok(query("SELECT current_value($1, $2) as value")
+        .bind(token_type)
+        .bind(value)
+        .fetch_one(pool)
+        .await?
+        .get::<i64, _>("value"))
 }
-// pub async fn get_account<'a, E>(pool: E, address: Address) -> Result<Account>
-// where
-//     E: Executor<'a, Database = Postgres> + Clone,
-// {
-//     let row = query("SELECT id, nonce FROM accounts where address = $1")
-//         .bind(address)
-//         .fetch_one(pool.clone())
-//         .await?;
-//     Ok(Account {
-//         nonce: row.get::<i64, _>("nonce"),
-//         balances: get_balances(pool.clone(), address).await?,
-//     })
-// }
-
 pub async fn initialize<'a, E>(pool: E) -> Result<()>
 where
     E: Executor<'a, Database = Postgres> + Clone,
@@ -231,6 +193,108 @@ where
         println!("{:?}", multi_sig::address(1, vec![*PUBLIC_KEY]).await);
         insert_hot_wallet(pool, multi_sig::address(1, vec![*PUBLIC_KEY]).await).await?;
     };
+    Ok(())
+}
+pub async fn insert_bitcoin_block<'a, E>(
+    pool: E,
+    block: ::bitcoin::Block,
+    exchange_rates: HashMap<TokenType, u64>,
+) -> Result<()>
+where
+    E: Executor<'a, Database = Postgres> + Clone,
+{
+    let bitcoin_block_id: i32 =
+        query("INSERT into bitcoin_blocks (hash, height) VALUES ($1, $2) RETURNING id")
+            .bind::<[u8; 32]>(<BlockHash as AsRef<[u8; 32]>>::as_ref(&block.block_hash())
+            .iter()
+            .copied()
+            .rev()
+            .collect::<Vec<_>>().try_into().unwrap())
+            .bind(block.bip34_block_height().unwrap() as i64)
+            .fetch_one(pool.clone())
+            .await
+            .unwrap()
+            .get("id");
+    query("INSERT into blocks (bitcoin_block_id) VALUES ($1)")
+        .bind(bitcoin_block_id)
+        .execute(pool.clone())
+        .await
+        .unwrap();
+    for (token_type, exchange_rate) in exchange_rates {
+        insert_exchange_rate(pool.clone(), token_type, exchange_rate).await?;
+    }
+    let deposit_utxos: Vec<((bitcoin::Txid, usize), TxOut)> = block
+        .txdata
+        .into_iter()
+        .flat_map(|t| {
+            t.output
+                .clone()
+                .into_iter()
+                .enumerate()
+                .map(move |(i, o)| ((t.compute_txid(), i), o.clone()))
+        })
+        .filter(|(_, output)| output.script_pubkey.is_p2wpkh())
+        .filter(|(_, output)| crate::bitcoin::is_stable_address(&output.script_pubkey))
+        .collect();
+
+    for ((txid, vout), deposit_utxo) in deposit_utxos {
+        insert_utxo(
+            pool.clone(),
+            script_buf_to_address(&deposit_utxo.script_pubkey),
+            (*<bitcoin::Txid as AsRef<[u8; 32]>>::as_ref(&txid)
+                .iter()
+                .copied()
+                .rev()
+                .collect::<Vec<_>>())
+            .try_into()
+            .unwrap(),
+            vout as i32,
+            deposit_utxo.value.to_sat() as i64,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+pub async fn insert_exchange_rate<'a, E>(
+    pool: E,
+    token_type: TokenType,
+    exchange_rate: u64,
+) -> Result<()>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    Ok(query(
+        "INSERT into exchange_rates (block_height, token_type, value) VALUES (current_block(), $1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(token_type)
+    .bind(exchange_rate as i64)
+    .execute(pool)
+    .await
+    .map(|_| ())?)
+}
+pub async fn insert_utxo<'a, E>(
+    pool: E,
+    stable_address: Address,
+    txid: [u8; 32],
+    vout: i32,
+    value: i64,
+) -> Result<()>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    query(
+        "INSERT into utxos (block_height, account_id, transaction_id, vout, value) VALUES (current_block(), account_id($1), $2, $3, $4)",
+    )
+    .bind(stable_address.0)
+    .bind(txid)
+    .bind(vout)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map(|_| ())?;
+    // use std::{thread, time};
+    // thread::sleep(time::Duration::from_secs(3000));
     Ok(())
 }
 
@@ -320,9 +384,16 @@ where
             .fetch_one(pool)
             .await?
             .get("value")
-            // .into_iter()
-            // .map(|row| (TokenType::Usd, row.get::<i64, &str>("value")))
-            // .collect(),
+    )
+}
+pub async fn get_utxos<'a, E>(pool: E, address: Address) -> Result<Vec<Utxo>>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    Ok(
+        query_as("SELECT * from utxos WHERE account_id = account_id($1)")
+            .bind(address)
+            .fetch_all(pool).await?.into_iter().collect()
     )
 }
 #[cfg(test)]
@@ -345,30 +416,48 @@ where
 }
 
 #[cfg(test)]
+macro_rules! bitcoin_block {
+    ($file_name:expr) => {{
+        let mut file = File::open(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/test_data/",
+            $file_name
+        ))
+        .unwrap();
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).unwrap();
+
+        ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
+    }};
+}
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bitcoin, tests::ALICE};
+    use crate::db;
+    use crate::tests::{BURNS, TEST_UTXO};
+    use ::bitcoin::consensus::Decodable;
     use sqlx::PgPool;
+    use std::fs::File;
+    use std::io::Read;
 
     #[sqlx::test]
-    async fn test_insert_bitcoin_block(pool: PgPool) {
+    async fn test_redeem_utxo(pool: PgPool) {
+        db::credit(&pool, *NODE_ADDRESS, TokenType::Usd, i32::MAX as i64)
+            .await
+            .unwrap();
+        let block = bitcoin_block!("deposit-block-877380.block");
         insert_bitcoin_block(
             &pool,
-            bitcoin::Block {
-                deposits: vec![bitcoin::Deposit {
-                    depositor: *ALICE,
-                    transaction_hash: [0; 32],
-                    value: 1000,
-                }],
-                ..Default::default()
-            },
-            (70783.11129211668 * 100.0) as i64,
+            block,
+            HashMap::from([(TokenType::Usd, (70783.11129211668 * 1000.0) as u64)]),
         )
         .await
         .unwrap();
-
+        redeem_utxo(&pool, *BURNS, TEST_UTXO.0, TEST_UTXO.1, TokenType::Usd)
+            .await
+            .unwrap();
         assert_eq!(
-            get_balance(&pool, *ALICE, TokenType::Usd).await.unwrap(),
+            get_balance(&pool, *BURNS, TokenType::Usd).await.unwrap(),
             70783
         )
     }

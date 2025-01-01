@@ -1,8 +1,9 @@
-use crate::address::Address;
 use borsh::{BorshDeserialize, BorshSerialize};
 use std::str::FromStr;
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Clone, Debug, PartialOrd, sqlx::Type)]
+#[derive(
+    Hash, BorshSerialize, BorshDeserialize, PartialEq, Clone, Debug, PartialOrd, sqlx::Type, Eq,
+)]
 #[sqlx(type_name = "token_type", rename_all = "lowercase")]
 pub enum TokenType {
     Snt,
@@ -25,7 +26,7 @@ impl FromStr for TokenType {
 pub struct Transfer {
     pub nonce: i64,
     pub token_type: TokenType,
-    pub to: Address,
+    pub to: [u8; 17],
     pub value: i64,
 }
 
@@ -33,5 +34,6 @@ pub struct Transfer {
 pub struct Withdraw {
     pub nonce: i64,
     pub to_bitcoin_address: String,
+    pub token_type: TokenType,
     pub value: i64,
 }

@@ -2,7 +2,7 @@ CREATE TYPE token_type AS ENUM ('usd', 'snt');
 
 CREATE TABLE accounts(
   id SERIAL PRIMARY KEY, 
-  address BYTEA UNIQUE CHECK (octet_length(address) = 33),
+  address BYTEA UNIQUE,
   nonce BIGINT NOT NULL DEFAULT 0
 );
 
@@ -31,12 +31,14 @@ CREATE TABLE bitcoin_blocks (
   hash BYTEA UNIQUE CHECK (octet_length(hash) = 32)
 );
 
+
 CREATE TABLE deposits(
   id SERIAL PRIMARY KEY, 
   bitcoin_transaction_hash BYTEA UNIQUE CHECK (octet_length(bitcoin_transaction_hash) = 32),
   bitcoin_block_id INT REFERENCES bitcoin_blocks(id), 
   value BIGINT
 );
+
 
 CREATE TABLE blocks (
   height SERIAL PRIMARY KEY,
@@ -45,6 +47,22 @@ CREATE TABLE blocks (
   bitcoin_exchange_rate BIGINT,
   hash_state BYTEA,
   timestamp TIMESTAMP
+);
+
+CREATE TABLE utxos(
+  id SERIAL PRIMARY KEY, 
+  account_id INT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+  transaction_id BYTEA UNIQUE CHECK (octet_length(transaction_id) = 32) NOT NULL,
+  vout INT NOT NULL, 
+  block_height INT REFERENCES blocks(height) NOT NULL,
+  redeemed BOOLEAN NOT NULL DEFAULT FALSE, 
+  value BIGINT NOT NULL
+);
+
+CREATE TABLE exchange_rates(
+  token_type token_type,
+  block_height INT REFERENCES blocks(height), 
+  value BIGINT
 );
 
 CREATE TABLE withdrawls(
@@ -91,6 +109,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE FUNCTION current_block()
+RETURNS int AS $$
+SELECT MAX(height) from blocks
+$$ LANGUAGE sql;
+
+CREATE FUNCTION current_value(token_type token_type, value BIGINT)
+RETURNS BIGINT AS $$
+SELECT value / $2 from exchange_rates WHERE token_type = $1 and block_height = current_block()
+$$ LANGUAGE sql;
+
+
 
 CREATE FUNCTION balance(account_id BIGINT, token_type token_type)
 RETURNS int AS $$
@@ -130,7 +159,7 @@ AFTER
   INSERT ON ledger FOR EACH ROW EXECUTE FUNCTION update_account_balances();
 
 
-INSERT INTO accounts (address) VALUES('\x000000000000000000000000000000000000000000000000000000000000000000');
+INSERT INTO accounts (address) VALUES('\x0000000000000000000000000000000000');
 CREATE FUNCTION system_address()
   RETURNS integer AS
-  $$SELECT id from accounts where address = '\x000000000000000000000000000000000000000000000000000000000000000000' $$ LANGUAGE sql IMMUTABLE;
+  $$SELECT id from accounts where address = '\x0000000000000000000000000000000000' $$ LANGUAGE sql IMMUTABLE;

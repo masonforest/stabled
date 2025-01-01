@@ -1,8 +1,6 @@
-use self::super::Block;
-use crate::bitcoin::Deposit;
 use bitcoin::{consensus::Decodable, Network};
-use rust_decimal::Decimal;
 use log::info;
+use rust_decimal::Decimal;
 use serde_json::{json, Value};
 use std::env;
 use tokio::sync::OnceCell;
@@ -55,16 +53,14 @@ pub async fn send_to_address(address: bitcoin::Address, value: i64) -> [u8; 32] 
             reqwest::header::CONTENT_TYPE,
             reqwest::header::HeaderValue::from_static("text/plain"),
         )
-        .json(&
-            json!({
+        .json(&json!({
                     "jsonrpc": "1.0",
                     "method": "sendtoaddress",
                     "params": [
                         address.to_string(),
                         Decimal::new(value, 8)
                     ]
-        })
-    )
+        }))
         .send()
         .await
         .unwrap()
@@ -112,7 +108,7 @@ pub async fn get_best_block_hash() -> [u8; 32] {
         .unwrap()
 }
 
-pub async fn get_block(block_hash: [u8; 32], hot_wallet_addresses: Vec<bitcoin::Address>) -> Block {
+pub async fn get_block(block_hash: [u8; 32]) -> bitcoin::Block {
     let client = reqwest::Client::new();
     let resp = client
         .post(env::var("BITCOIND_URL").unwrap())
@@ -123,7 +119,7 @@ pub async fn get_block(block_hash: [u8; 32], hot_wallet_addresses: Vec<bitcoin::
         .json(&json!({
                     "jsonrpc": "1.0",
                     "method": "getblock",
-                    "params": [hex::encode(block_hash), 2]
+                    "params": [hex::encode(block_hash), 0]
         }))
         .send()
         .await
@@ -132,97 +128,26 @@ pub async fn get_block(block_hash: [u8; 32], hot_wallet_addresses: Vec<bitcoin::
         .await
         .unwrap();
 
-    Block {
-        hash: resp
-            .get("result")
-            .unwrap()
-            .get("hash")
-            .map(|x| {
-                hex::decode(x.as_str().unwrap())
-                    .unwrap()
-                    .try_into()
-                    .unwrap()
-            })
-            .unwrap(),
-        height: resp
-            .get("result")
-            .unwrap()
-            .get("height")
-            .map(|x| x.as_i64().unwrap())
-            .unwrap(),
-        parent_hash: resp
-            .get("result")
-            .unwrap()
-            .get("previousblockhash")
-            .map(|x| {
-                hex::decode(x.as_str().unwrap())
-                    .unwrap()
-                    .try_into()
-                    .unwrap()
-            })
-            .unwrap(),
-        deposits: decode_deposits(
-            resp.get("result")
-                .unwrap()
-                .get("tx")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .into_iter()
-                .collect::<Vec<_>>(),
-            &hot_wallet_addresses,
-        ),
-        withdrawls: vec![],
-    }
+    let mut raw = bitcoin_io::Cursor::new(
+        hex::decode(resp.get("result").unwrap().as_str().unwrap()).unwrap(),
+    );
+    bitcoin::Block::consensus_decode(&mut raw).unwrap()
 }
 
-pub fn decode_deposits(
-    transaction_values: Vec<&Value>,
-    hot_wallet_addresses: &Vec<bitcoin::Address>,
-) -> Vec<Deposit> {
-    transaction_values
-        .into_iter()
-        .flat_map(|transaction_value| {
-            let transaction = decode_transaction(transaction_value);
-            transaction
-                .output
-                .clone()
-                .into_iter()
-                .map(|output| {
-                    (
-                        transaction.compute_txid(),
-                        output,
-                        transaction.input[0].clone(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .filter_map(
-            |(txid, output, input): (bitcoin::Txid, bitcoin::TxOut, bitcoin::TxIn)| {
-                if hot_wallet_addresses
-                    .into_iter()
-                    .map(|address| address.script_pubkey())
-                    .collect::<Vec<bitcoin::ScriptBuf>>()
-                    .contains(&output.script_pubkey)
-                    && input.witness.nth(1).is_some()
-                    && input.witness.nth(1).unwrap().len() == 33
-                {
-                    Some(Deposit {
-                        depositor: input.witness.nth(1).unwrap().try_into().unwrap(),
-                        transaction_hash: *<bitcoin::Txid as AsRef<[u8; 32]>>::as_ref(&txid),
+#[cfg(test)]
+mod tests {
 
-                        value: output.value.to_sat() as i64,
-                    })
-                } else {
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-fn decode_transaction(value: &Value) -> bitcoin::Transaction {
-    let mut raw =
-        bitcoin_io::Cursor::new(hex::decode(value.get("hex").unwrap().as_str().unwrap()).unwrap());
-    bitcoin::Transaction::consensus_decode(&mut raw).unwrap()
+    // #[tokio::test]
+    // async fn test_get_block2() {
+    //     dotenv().ok();
+    //     println!("{}", hex::encode(get_best_block_hash().await));
+    //     let block = get_block(
+    //         hex::decode("00000000000000000001330b19514a342ff0cb95b4df6a51f94116067b4cf21f")
+    //             .unwrap()
+    //             .try_into()
+    //             .unwrap(),
+    //     )
+    //     .await;
+    //     println!("{:?}", block);
+    // }
 }
