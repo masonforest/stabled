@@ -6,10 +6,10 @@ mod error;
 pub mod exchange_rates;
 pub mod transaction;
 
-use crate::address::Address;
 use crate::{
+    address::Address,
     error::Error,
-    transaction::{TokenType, Transfer, Withdraw},
+    transaction::{ClaimUtxo, Currency, Transfer},
 };
 use ::bitcoin::Network;
 use axum::{
@@ -36,7 +36,7 @@ pub async fn app(pool: PgPool) -> Router {
 
     Router::new()
         .route("/transactions", post(insert_transaction))
-        .route("/balances/:token_type/:address", get(get_balance))
+        .route("/balances/:currency/:address", get(get_balance))
         .route("/utxos/:address", get(get_utxos))
         .layer(cors)
         .with_state(pool)
@@ -44,39 +44,68 @@ pub async fn app(pool: PgPool) -> Router {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct Account {
     nonce: i64,
-    balances: Vec<(TokenType, i64)>,
+    balances: Vec<(Currency, i64)>,
+}
+
+#[derive(sqlx::FromRow, sqlx::Type, BorshSerialize)]
+pub struct Utxo {
+    transaction_id: [u8; 32],
+    vout: i32,
+    value: i64,
+}
+
+impl From<db::Utxo> for Utxo {
+    fn from(utxo: db::Utxo) -> Self {
+        Self {
+            transaction_id: utxo.transaction_id.try_into().unwrap(),
+            vout: utxo.vout,
+            value: utxo.value,
+        }
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 enum Transaction {
     Transfer(Transfer),
-    Withdraw(Withdraw),
+    ClaimUtxo(ClaimUtxo),
 }
 impl Transaction {
     #[cfg(test)]
-    fn sign(&self, signing_key: &SigningKey) -> SignedTransaction {
+    fn sign(&self, nonce: i64, signing_key: &SigningKey) -> SignedTransaction {
         let (signature, recovery_id) = signing_key
-            .sign_recoverable(&borsh::to_vec(&self).unwrap())
+            .sign_recoverable(&borsh::to_vec(&(nonce, &self)).unwrap())
             .unwrap();
         let signature_bytes: [u8; 65] = [signature.to_bytes().as_slice(), &[recovery_id.to_byte()]]
             .concat()
             .try_into()
             .unwrap();
-        SignedTransaction(self.clone(), signature_bytes)
+        SignedTransaction {
+            transaction: self.clone(),
+            nonce: nonce,
+            signature: signature_bytes,
+        }
     }
 }
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
-pub struct SignedTransaction(Transaction, pub [u8; 65]);
+pub struct SignedTransaction {
+    transaction: Transaction,
+    nonce: i64,
+    pub signature: [u8; 65],
+}
 
 impl SignedTransaction {
     pub fn from_address(&self) -> Address {
-        let s: [u8; 64] = self.1[0..64].try_into().unwrap();
+        let s: [u8; 64] = self.signature[0..64].try_into().unwrap();
         let signature = Signature::from_bytes(&s.into()).unwrap();
-        let recovery_id = RecoveryId::from_byte(self.1[64]).unwrap();
-        VerifyingKey::recover_from_msg(&borsh::to_vec(&self.0).unwrap(), &signature, recovery_id)
-            .unwrap()
-            .try_into()
-            .unwrap()
+        let recovery_id = RecoveryId::from_byte(self.signature[64]).unwrap();
+        VerifyingKey::recover_from_msg(
+            &borsh::to_vec(&(self.nonce, &self.transaction)).unwrap(),
+            &signature,
+            recovery_id,
+        )
+        .unwrap()
+        .try_into()
+        .unwrap()
     }
 }
 
@@ -84,37 +113,48 @@ pub async fn insert_transaction(
     State(pool): State<PgPool>,
     body: Bytes,
 ) -> axum::response::Result<impl IntoResponse> {
+    // println!("hex:{}", hex::encode(body.to_vec()));
     let transaction: SignedTransaction = borsh::from_slice(&body.to_vec()).map_err(Error::from)?;
+    // println!("{}", hex::encode(transaction.from_address().0));
     db::insert_transaction(&pool, transaction.clone()).await?;
-    match transaction.0 {
-        Transaction::Withdraw(ref withdraw) => {
+    match transaction.transaction {
+        Transaction::Transfer(Transfer {
+            currency,
+            to: transaction::Address::Bitcoin(bitcoin_address),
+            value,
+        }) => {
+            // println!("current value: {}", value);
             let transaction_id = bitcoin::rpc::send_to_address(
-                ::bitcoin::Address::from_str(&withdraw.to_bitcoin_address)
+                ::bitcoin::Address::from_str(&bitcoin_address)
                     .map_err(Error::from)?
                     .require_network(Network::Bitcoin)
                     .map_err(Error::from)?,
-                db::current_value_in_satoshis(&pool, &withdraw.token_type, withdraw.value).await?,
+                db::currency_to_satoshis(&pool, &currency, value).await?,
             )
             .await;
-            Ok(borsh::to_vec(&transaction_id)
+            return Ok(borsh::to_vec(&transaction_id)
                 .map_err(Error::from)
-                .into_response())
+                .into_response());
+            // return Ok(borsh::to_vec(&[0u8; 32]).map_err(Error::from)
+            // .into_response())
         }
-        _ => Ok(vec![].into_response()),
-    }
-    // Ok(borsh::to_vec(&[0u8; 32].to_vec()).map_err(Error::from)
-    // .into_response())
+        _ => (),
+    };
+    Ok(borsh::to_vec(&[0u8; 32].to_vec())
+        .map_err(Error::from)
+        .into_response())
+    // Ok(vec![].into_response())
 }
 
 async fn get_balance(
     State(pool): State<PgPool>,
-    axum::extract::Path((token_type, address)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((currency, address)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Result<impl IntoResponse> {
     Ok(borsh::to_vec(
         &db::get_balance(
             &pool,
             Address(hex::decode(&address).map_err(Error::from)?.try_into()?),
-            TokenType::from_str(&token_type)?,
+            Currency::from_str(&currency)?,
         )
         .await?,
     )
@@ -134,9 +174,12 @@ async fn get_utxos(
                     .map_err(Error::from)?
                     .try_into()
                     .unwrap(),
-            )
+            ),
         )
-        .await?,
+        .await?
+        .into_iter()
+        .map(Utxo::from)
+        .collect::<Vec<_>>(),
     )
     .map_err(Error::from)
     .into_response())
@@ -145,8 +188,10 @@ async fn get_utxos(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::address::Address;
-    use crate::transaction::{TokenType, Transfer};
+    use crate::{
+        address::Address,
+        transaction::{Currency, Transfer},
+    };
     use ::bitcoin::consensus::Decodable;
     use axum::{
         body::Body,
@@ -161,11 +206,7 @@ mod tests {
     use secp256k1::rand::rngs::OsRng;
     use serde_json::json;
     use sqlx::PgPool;
-    use std::collections::HashMap;
-
-    use std::env;
-    use std::fs::File;
-    use std::io::Read;
+    use std::{collections::HashMap, env, fs::File, io::Read};
     use tower::ServiceExt;
 
     lazy_static! {
@@ -217,17 +258,23 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn transfer(pool: PgPool) {
-        db::credit(&pool, *ALICE, TokenType::Usd, 10000)
+    async fn test_transfer(pool: PgPool) {
+        db::credit(&pool, *ALICE, Currency::Usd, 10000)
             .await
             .unwrap();
         let transaction = Transaction::Transfer(Transfer {
-            nonce: 0,
-            token_type: TokenType::Usd,
-            to: (*BOB).0,
+            currency: Currency::Usd,
+            to: crate::transaction::Address::Stable(*BOB),
             value: 10000,
         });
-        let signed_transaction = transaction.sign(&ALICES_SECRET_KEY.clone());
+        let transaction2 = Transaction::Transfer(Transfer {
+            currency: Currency::Usd,
+            to: transaction::Address::Bitcoin("36sTjLr6VTRfF5MQGTH3BVVeDH17aEwQQW".to_string()),
+            value: 4,
+        });
+        // println!("{}", hex::encode(borsh::to_vec(&(2i64, transaction2)).unwrap()));
+
+        let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
         let request = Request::builder()
             .method("POST")
             .header("content-type", "application/octet-stream")
@@ -280,7 +327,7 @@ mod tests {
                             "method": "sendtoaddress",
                             "params": [
                                 ALICES_BITCOIN_ADDRESS.to_string(),
-                                Decimal::new(7078, 8)
+                                Decimal::new(1000, 8)
                             ]
                         })
                         .to_string(),
@@ -294,23 +341,22 @@ mod tests {
                 }).to_string());
             });
         env::set_var("BITCOIND_URL", server.url(""));
-        db::credit(&pool, *ALICE, TokenType::Usd, 10000)
+        db::credit(&pool, *ALICE, Currency::Usd, 10000)
             .await
             .unwrap();
         db::insert_bitcoin_block(
             &pool,
             bitcoin_block!("deposit-block-877380.block"),
-            HashMap::from([(TokenType::Usd, (70783.11129211668 * 1000.0) as u64)]),
+            HashMap::from([(Currency::Usd, 100000f64)]),
         )
         .await
         .unwrap();
-        let transaction = Transaction::Withdraw(Withdraw {
-            nonce: 0,
-            to_bitcoin_address: ALICES_BITCOIN_ADDRESS.clone(),
-            token_type: TokenType::Usd,
+        let transaction = Transaction::Transfer(Transfer {
+            to: transaction::Address::Bitcoin((*ALICES_BITCOIN_ADDRESS).to_string()),
+            currency: Currency::Usd,
             value: 10000,
         });
-        let signed_transaction = transaction.sign(&ALICES_SECRET_KEY.clone());
+        let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
         let request = Request::builder()
             .method("POST")
             .header("content-type", "application/octet-stream")
@@ -339,4 +385,19 @@ mod tests {
 
         assert_eq!(from_slice::<i64>(&body).unwrap(), 0);
     }
+    // #[sqlx::test]
+    // async fn claim_utxo2(pool: PgPool) {
+    //     let transaction = Transaction::ClaimUtxo(transaction::ClaimUtxo {
+    //         transaction_id: [0; 32],
+    //         vout: 0,
+    //         Currency::Usd,
+    //     });
+    //     let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
+    //     let request = Request::builder()
+    //         .method("POST")
+    //         .header("content-type", "application/octet-stream")
+    //         .uri("/transactions")
+    //         .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
+    //         .unwrap();
+    // }
 }

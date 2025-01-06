@@ -1,15 +1,10 @@
 use bitcoin::{key::Secp256k1, Address, Network, PrivateKey, PublicKey};
 use dotenv::dotenv;
-use std::io::Read;
-use bitcoin::consensus::Decodable;
-use stable::transaction::TokenType;
 use rustls_acme::{caches::DirCache, AcmeConfig};
 use sqlx::postgres::PgPoolOptions;
 use stable::constants::{Env, ENV, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT};
 use std::{env, net::Ipv6Addr, path::PathBuf};
 use tokio::spawn;
-use std::fs::File;
-use std::collections::HashMap;
 use tokio_stream::StreamExt;
 
 #[tokio::main]
@@ -26,17 +21,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let pool = PgPoolOptions::new().connect(&database_url).await?;
     let app = stable::app(pool.clone()).await;
     stable::db::initialize(&pool).await?;
-    stable::db::insert_bitcoin_block(
-        &pool,
-        {
-            let mut file = File::open("src/test_data/deposit-block-877380.block").unwrap();
-            let mut data = Vec::new();
-            file.read_to_end(&mut data).unwrap();
+    // stable::db::insert_bitcoin_block(
+    //     &pool,
+    //     {
+    //         let mut file = File::open("src/test_data/deposit-block-877380.block").unwrap();
+    //         let mut data = Vec::new();
+    //         file.read_to_end(&mut data).unwrap();
 
-            ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
-        },
-        HashMap::from([(TokenType::Usd, (96628.51 * 1000.0) as u64)]),
-    ).await.unwrap();
+    //         ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
+    //     },
+    //     HashMap::from([(currency::Usd, (96628.51 * 1000.0) as u64)]),
+    // )
+    // .await
+    // .unwrap();
     // let block_hash = hex::decode("00000000000000000000a54a5c49d330ccbd050e511c13d62b26dd52f7881067").unwrap().try_into().unwrap();
     // let block = stable::bitcoin::rpc::get_block(block_hash, db::get_hot_wallets(&pool).await?).await;
     // let deposits = rpc::decode_deposits(

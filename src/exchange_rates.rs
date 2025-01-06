@@ -2,7 +2,7 @@ use crate::{constants::COIN_MARKET_CAP_KEY, error::Result};
 use reqwest::Client;
 use serde_json::Value;
 
-pub async fn bitcoin() -> Result<u64> {
+pub async fn bitcoin() -> Result<f64> {
     // Create an HTTP client
     let client = Client::new();
 
@@ -29,7 +29,7 @@ pub async fn bitcoin() -> Result<u64> {
                     .get("price")
                     .expect("price")
             );
-            Ok((json.get("data").expect("data").get("BTC").expect("BTC")[0]
+            Ok(json.get("data").expect("data").get("BTC").expect("BTC")[0]
                 .get("quote")
                 .expect("quote")
                 .get("USD")
@@ -37,8 +37,7 @@ pub async fn bitcoin() -> Result<u64> {
                 .get("price")
                 .expect("price")
                 .as_f64()
-                .expect("not f64")
-                * 1000.00) as u64)
+                .expect("not f64"))
         }
         Err(e) => Err(e.into()),
     }

@@ -4,18 +4,21 @@ use std::str::FromStr;
 #[derive(
     Hash, BorshSerialize, BorshDeserialize, PartialEq, Clone, Debug, PartialOrd, sqlx::Type, Eq,
 )]
-#[sqlx(type_name = "token_type", rename_all = "lowercase")]
-pub enum TokenType {
-    Snt,
+#[sqlx(type_name = "currency", rename_all = "lowercase")]
+pub enum Currency {
     Usd,
 }
+#[derive(Clone, Debug, PartialEq, BorshSerialize, BorshDeserialize)]
+pub enum Address {
+    Bitcoin(String),
+    Stable(crate::Address),
+}
 
-impl FromStr for TokenType {
+impl FromStr for Currency {
     type Err = ();
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
-            "snt" => Ok(Self::Snt),
             "usd" => Ok(Self::Usd),
             _ => Err(()),
         }
@@ -24,16 +27,14 @@ impl FromStr for TokenType {
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct Transfer {
-    pub nonce: i64,
-    pub token_type: TokenType,
-    pub to: [u8; 17],
+    pub currency: Currency,
+    pub to: Address,
     pub value: i64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
-pub struct Withdraw {
-    pub nonce: i64,
-    pub to_bitcoin_address: String,
-    pub token_type: TokenType,
-    pub value: i64,
+pub struct ClaimUtxo {
+    pub currency: Currency,
+    pub transaction_id: [u8; 32],
+    pub vout: i32,
 }

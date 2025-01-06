@@ -1,165 +1,254 @@
-CREATE TYPE token_type AS ENUM ('usd', 'snt');
+CREATE TYPE currency AS ENUM(
+    'usd'
+);
+
+CREATE TABLE currencies(
+    currency currency PRIMARY KEY,
+    decimals smallint
+);
 
 CREATE TABLE accounts(
-  id SERIAL PRIMARY KEY, 
-  address BYTEA UNIQUE,
-  nonce BIGINT NOT NULL DEFAULT 0
+    id serial PRIMARY KEY,
+    address bytea UNIQUE,
+    nonce bigint NOT NULL DEFAULT 0
 );
 
 CREATE TABLE balances(
-  account_id INT, 
-  token_type token_type,
-  value BIGINT NOT NULL DEFAULT 0,
-  UNIQUE (account_id, token_type),
-  PRIMARY KEY(account_id, token_type)
+    account_id int,
+    currency currency,
+    value bigint NOT NULL DEFAULT 0,
+    UNIQUE (account_id, currency),
+    PRIMARY KEY (account_id, currency)
 );
 
 CREATE TABLE hot_wallets(
-  id SERIAL PRIMARY KEY, 
-  address varchar(62) 
+    id serial PRIMARY KEY,
+    address varchar(62)
 );
 
 CREATE TABLE peers(
-  id SERIAL PRIMARY KEY, 
-  is_self BOOLEAN,
-  address INET
+    id serial PRIMARY KEY,
+    is_self boolean,
+    address inet
 );
 
-CREATE TABLE bitcoin_blocks (
-  id SERIAL PRIMARY KEY, 
-  height INT,
-  hash BYTEA UNIQUE CHECK (octet_length(hash) = 32)
+CREATE TABLE bitcoin_blocks(
+    id serial PRIMARY KEY,
+    height int,
+    hash BYTEA UNIQUE CHECK (octet_length(hash) = 32)
 );
-
 
 CREATE TABLE deposits(
-  id SERIAL PRIMARY KEY, 
-  bitcoin_transaction_hash BYTEA UNIQUE CHECK (octet_length(bitcoin_transaction_hash) = 32),
-  bitcoin_block_id INT REFERENCES bitcoin_blocks(id), 
-  value BIGINT
+    id serial PRIMARY KEY,
+    bitcoin_transaction_hash bytea UNIQUE CHECK (octet_length(bitcoin_transaction_hash) = 32),
+    bitcoin_block_id int REFERENCES bitcoin_blocks(id),
+    value bigint
 );
 
-
-CREATE TABLE blocks (
-  height SERIAL PRIMARY KEY,
-  hash BYTEA UNIQUE CHECK (octet_length(hash) = 32),
-  bitcoin_block_id INT REFERENCES bitcoin_blocks(id), 
-  bitcoin_exchange_rate BIGINT,
-  hash_state BYTEA,
-  timestamp TIMESTAMP
+CREATE TABLE blocks(
+    height serial PRIMARY KEY,
+    hash BYTEA UNIQUE CHECK (octet_length(hash) = 32),
+    bitcoin_block_id int REFERENCES bitcoin_blocks(id),
+    bitcoin_exchange_rate bigint,
+    hash_state bytea,
+    timestamp timestamp
 );
 
 CREATE TABLE utxos(
-  id SERIAL PRIMARY KEY, 
-  account_id INT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-  transaction_id BYTEA UNIQUE CHECK (octet_length(transaction_id) = 32) NOT NULL,
-  vout INT NOT NULL, 
-  block_height INT REFERENCES blocks(height) NOT NULL,
-  redeemed BOOLEAN NOT NULL DEFAULT FALSE, 
-  value BIGINT NOT NULL
+    id serial PRIMARY KEY,
+    account_id int NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    transaction_id bytea UNIQUE CHECK (octet_length(transaction_id) = 32) NOT NULL,
+    vout int NOT NULL,
+    block_height int REFERENCES blocks(height) NOT NULL,
+    redeemed boolean NOT NULL DEFAULT FALSE,
+    value bigint NOT NULL
 );
 
 CREATE TABLE exchange_rates(
-  token_type token_type,
-  block_height INT REFERENCES blocks(height), 
-  value BIGINT
+    currency currency,
+    block_height int REFERENCES blocks(height),
+    value bigint
 );
 
 CREATE TABLE withdrawls(
-  hash BYTEA UNIQUE CHECK (octet_length(hash) = 32)  PRIMARY KEY,
-  block_height INT REFERENCES blocks(height), 
-  value BIGINT
+    hash BYTEA UNIQUE CHECK (octet_length(hash) = 32) PRIMARY KEY,
+    block_height int REFERENCES blocks(height),
+    value bigint
 );
 
 CREATE TABLE ledger(
-  id BIGSERIAL PRIMARY KEY, 
-  token_type token_type,
-  payor_id INT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-  recipient_id INT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT, 
-  value BIGINT NOT NULL
+    id bigserial PRIMARY KEY,
+    currency currency,
+    payor_id int NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    recipient_id int NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    value bigint NOT NULL
 );
 
 CREATE TABLE signatures(
-  transaction_id INT NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT, 
-  account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-  nonce BIGINT,
-  signature BYTEA CHECK (octet_length(signature) = 65)
+    transaction_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT,
+    account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    nonce bigint,
+    signature bytea CHECK (octet_length(signature) = 65)
 );
 
 CREATE FUNCTION account_id(address_ bytea)
-RETURNS int AS $$
+    RETURNS int
+    AS $$
 DECLARE
     account_id int;
 BEGIN
     WITH new_account AS (
-        INSERT INTO accounts (address)
-        SELECT $1
-        WHERE NOT EXISTS (
-            SELECT 1 FROM accounts WHERE address = $1
-        )
-        RETURNING id
-    )
-    SELECT id INTO account_id
-    FROM new_account
+INSERT INTO accounts(address)
+        SELECT
+            $1
+        WHERE
+            NOT EXISTS (
+                SELECT
+                    1
+                FROM
+                    accounts
+                WHERE
+                    address = $1)
+            RETURNING
+                id
+)
+    SELECT
+        id INTO account_id
+    FROM
+        new_account
     UNION
-    SELECT id FROM accounts WHERE address = $1
+    SELECT
+        id
+    FROM
+        accounts
+    WHERE
+        address = $1
     LIMIT 1;
-
     RETURN account_id;
 END;
-$$ LANGUAGE plpgsql;
+$$
+LANGUAGE plpgsql;
 
 CREATE FUNCTION current_block()
-RETURNS int AS $$
-SELECT MAX(height) from blocks
-$$ LANGUAGE sql;
+    RETURNS int
+    AS $$
+    SELECT
+        MAX(height)
+    FROM
+        blocks
+$$
+LANGUAGE sql;
 
-CREATE FUNCTION current_value(token_type token_type, value BIGINT)
-RETURNS BIGINT AS $$
-SELECT value / $2 from exchange_rates WHERE token_type = $1 and block_height = current_block()
-$$ LANGUAGE sql;
+CREATE FUNCTION currency_decimal_multiplier(currency currency)
+    RETURNS int
+    AS $$
+    SELECT
+(10 ^(
+                SELECT
+                    decimals
+                FROM currencies
+                WHERE
+                    currencies.currency = $1))
+$$
+LANGUAGE sql;
 
+CREATE FUNCTION satoshis_to_currency(currency currency, value bigint)
+    RETURNS bigint
+    AS $$
+    SELECT
+(value / $2) / currency_decimal_multiplier(currency)
+    FROM
+        exchange_rates
+    WHERE
+        currency = $1
+        AND block_height = current_block()
+$$
+LANGUAGE sql;
 
+CREATE FUNCTION currency_to_satoshis(currency currency, value bigint)
+    RETURNS bigint
+    AS $$
+    SELECT
+        $2 *  value / currency_decimal_multiplier(currency) / 1000000
+    FROM
+        exchange_rates
+    WHERE
+        currency = $1
+        AND block_height = current_block()
+$$
+LANGUAGE sql;
 
-CREATE FUNCTION balance(account_id BIGINT, token_type token_type)
-RETURNS int AS $$
-SELECT COALESCE((SELECT value FROM balances WHERE balances.account_id = $1 AND balances.token_type = $2), 0)
-$$ LANGUAGE sql;
+CREATE FUNCTION balance(account_id bigint, currency currency)
+    RETURNS int
+    AS $$
+    SELECT
+        COALESCE((
+            SELECT
+                value
+            FROM balances
+            WHERE
+                balances.account_id = $1
+                AND balances.currency = $2), 0)
+$$
+LANGUAGE sql;
 
-CREATE FUNCTION validate_entry() RETURNS TRIGGER AS $$ BEGIN
-    IF balance(NEW.payor_id, NEW.token_type) < NEW.value AND
-     NEW.payor_id != system_address() 
-    THEN RAISE EXCEPTION 'Payor has insufficient funds';
-END IF;
-RETURN NEW;
+CREATE FUNCTION validate_entry()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    IF balance(NEW.payor_id, NEW.currency) < NEW.value AND NEW.payor_id != system_address() THEN
+        RAISE EXCEPTION 'Payor has insufficient funds';
+    END IF;
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER validate_before_insert BEFORE INSERT ON ledger FOR EACH ROW EXECUTE FUNCTION validate_entry();
+$$
+LANGUAGE plpgsql;
 
-CREATE FUNCTION update_account_balances() RETURNS TRIGGER AS $$ BEGIN 
-INSERT INTO balances (
-    account_id,
-    token_type,
-    value
-) VALUES (NEW.recipient_id, NEW.token_type, NEW.value)
-ON CONFLICT (account_id, token_type) DO UPDATE
-SET value = balances.value + NEW.value; 
-INSERT INTO balances (
-    account_id,
-    token_type,
-    value
-) VALUES (NEW.payor_id, NEW.token_type, -NEW.value)
-ON CONFLICT (account_id, token_type) DO UPDATE
-SET value = balances.value - NEW.value;
-RETURN NEW;
+CREATE TRIGGER validate_before_insert
+    BEFORE INSERT ON ledger
+    FOR EACH ROW
+    EXECUTE FUNCTION validate_entry();
+
+CREATE FUNCTION update_account_balances()
+    RETURNS TRIGGER
+    AS $$
+BEGIN
+    INSERT INTO balances(account_id, currency, value)
+        VALUES(NEW.recipient_id, NEW.currency, NEW.value)
+    ON CONFLICT(account_id, currency)
+        DO UPDATE SET
+            value = balances.value + NEW.value;
+    INSERT INTO balances(account_id, currency, value)
+        VALUES(NEW.payor_id, NEW.currency, - NEW.value)
+    ON CONFLICT(account_id, currency)
+        DO UPDATE SET
+            value = balances.value - NEW.value;
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER update_balances_after_insert 
-AFTER 
-  INSERT ON ledger FOR EACH ROW EXECUTE FUNCTION update_account_balances();
+$$
+LANGUAGE plpgsql;
 
+CREATE TRIGGER update_balances_after_insert
+    AFTER INSERT ON ledger
+    FOR EACH ROW
+    EXECUTE FUNCTION update_account_balances();
 
-INSERT INTO accounts (address) VALUES('\x0000000000000000000000000000000000');
+INSERT INTO accounts(address)
+    VALUES ('\x0000000000000000000000000000000000');
+
+INSERT INTO currencies(currency, decimals)
+    VALUES ('usd', 2);
+
 CREATE FUNCTION system_address()
-  RETURNS integer AS
-  $$SELECT id from accounts where address = '\x0000000000000000000000000000000000' $$ LANGUAGE sql IMMUTABLE;
+    RETURNS integer
+    AS $$
+    SELECT
+        id
+    FROM
+        accounts
+    WHERE
+        address = '\x0000000000000000000000000000000000'
+$$
+LANGUAGE sql
+IMMUTABLE;
+

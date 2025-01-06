@@ -1,8 +1,7 @@
 use crate::{BorshDeserialize, BorshSerialize};
 use bitcoin::ScriptBuf;
 use k256::ecdsa::VerifyingKey;
-use sha2::Digest;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 #[derive(
     Clone, Copy, sqlx::Type, PartialEq, sqlx::FromRow, Debug, BorshSerialize, BorshDeserialize,
 )]
@@ -11,7 +10,9 @@ pub struct Address(pub [u8; 17]);
 
 impl From<[u8; 33]> for Address {
     fn from(array: [u8; 33]) -> Self {
+        // println!("{}", hex::encode(array));
         let hash = Sha256::digest(array);
+        // println!("{}", hex::encode(hash));
         Self(hash[15..].try_into().unwrap())
     }
 }
@@ -23,9 +24,11 @@ impl From<bitcoin::PublicKey> for Address {
 }
 impl From<VerifyingKey> for Address {
     fn from(verifying_key: VerifyingKey) -> Self {
-        <[u8; 33]>::try_from(verifying_key.to_sec1_bytes().as_ref())
+        let x: [u8; 33] = <[u8; 33]>::try_from(verifying_key.to_sec1_bytes().as_ref())
             .unwrap()
-            .into()
+            .into();
+        // println!("converting:{}", hex::encode(x));
+        x.into()
     }
 }
 

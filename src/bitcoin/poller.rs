@@ -1,6 +1,5 @@
 use self::super::rpc;
-use crate::TokenType;
-use crate::{db, exchange_rates};
+use crate::{db, exchange_rates, Currency};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use tokio::time;
@@ -21,11 +20,12 @@ pub async fn poll(pool: PgPool) {
     let current_best_block_hash = db::get_best_block_hash(&pool).await.unwrap();
     let new_best_block_hash = rpc::get_best_block_hash().await;
 
-    if Some(new_best_block_hash) != current_best_block_hash {
+    if current_best_block_hash != Some(new_best_block_hash) {
+        // println!("inserting {} {}", hex::encode(current_best_block_hash.unwrap()), hex::encode(new_best_block_hash));
         db::insert_bitcoin_block(
             &pool,
             rpc::get_block(new_best_block_hash).await,
-            HashMap::from([(TokenType::Usd, exchange_rates::bitcoin().await.unwrap())]),
+            HashMap::from([(Currency::Usd, exchange_rates::bitcoin().await.unwrap())]),
         )
         .await
         .unwrap();

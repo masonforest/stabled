@@ -2,8 +2,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::array::TryFromSliceError;
-use std::convert::Infallible;
+use std::{array::TryFromSliceError, convert::Infallible};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
