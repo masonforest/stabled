@@ -20,7 +20,7 @@ pub async fn bitcoin() -> Result<f64> {
             let json: Value = resp.json().await?;
             // Print the JSON data
             println!(
-                "{:#}",
+                "Bitcoin Price: {:#}",
                 json.get("data").expect("data").get("BTC").expect("BTC")[0]
                     .get("quote")
                     .expect("quote")

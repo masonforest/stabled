@@ -267,7 +267,7 @@ mod tests {
             to: crate::transaction::Address::Stable(*BOB),
             value: 10000,
         });
-        let transaction2 = Transaction::Transfer(Transfer {
+        let _transaction2 = Transaction::Transfer(Transfer {
             currency: Currency::Usd,
             to: transaction::Address::Bitcoin("36sTjLr6VTRfF5MQGTH3BVVeDH17aEwQQW".to_string()),
             value: 4,

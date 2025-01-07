@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 axum = "0.7.5"
 axum-server = "0.7.1"
-base64 = "0.22.1"
 bech32 = "0.11.0"
 bitcoin = "0.32.2"
 bitcoin-io = "0.1.2"
@@ -17,12 +16,9 @@ borsh-derive = { version = "1.0.0-alpha.6" }
 dotenv = "0.15.0"
 env_logger = "0.11.5"
 hex = "0.4.3"
-http-body-util = "0.1.2"
-httpmock = "0.8.0-alpha.1"
 k256 = { version = "0.13.3", features =["ecdsa-core"] }
 lazy_static = "1.5.0"
 log = "0.4.22"
-memoize = "0.4.2"
 reqwest = { version ="0.12.7", features = ["json"]}
 rust_decimal = "1.36.0"
 rustls-acme = {version = "*", features=["axum"]}
@@ -37,4 +33,6 @@ tower = "0.5.1"
 tower-http = {version = "0.5.2", features = ["cors"]}
 
 [dev-dependencies]
+http-body-util = "0.1.2"
+httpmock = "0.8.0-alpha.1"
 tower = { version = "0.5.1", features = ["util"] }
