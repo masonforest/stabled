@@ -92,8 +92,8 @@ pub async fn insert_transfer<'a, E>(
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
-    // println!("rec:{}", hex::encode(recipient.0));
-    // println!("value: {}", value);
+    println!("rec:{}", hex::encode(recipient.0));
+    println!("value: {}", value);
     query(
         "INSERT into ledger (currency, payor_id, recipient_id, value)
         VALUES ($1, account_id($2), account_id($3), $4)
@@ -473,12 +473,12 @@ mod tests {
             .await
             .unwrap();
         let block = bitcoin_block!("deposit-block-877380.block");
-        insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 70783.11)]))
+        insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
             .await
             .unwrap();
         claim_utxo(&pool, *BURNS, TEST_UTXO.0, TEST_UTXO.1, &Currency::Usd)
             .await
             .unwrap();
-        assert_eq!(get_balance(&pool, *BURNS, Currency::Usd).await.unwrap(), 70)
+        assert_eq!(get_balance(&pool, *BURNS, Currency::Usd).await.unwrap(), 100)
     }
 }
