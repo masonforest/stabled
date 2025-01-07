@@ -156,7 +156,7 @@ CREATE FUNCTION satoshis_to_currency(currency currency, value bigint)
     RETURNS bigint
     AS $$
     SELECT
-((value * $2) + (50000000)) / 100000000
+((value * $2) +(50000000)) / 100000000
     FROM
         exchange_rates
     WHERE
@@ -169,12 +169,12 @@ CREATE FUNCTION currency_to_satoshis(currency currency, value bigint)
     RETURNS bigint
     AS $$
     SELECT
-        $2 * value / currency_decimal_multiplier(currency) / 1000000
+((($2 * 100000000) - 50000000) / exchange_rates.value)
     FROM
         exchange_rates
     WHERE
         currency = $1
-        AND block_height = current_block()
+        AND block_height = current_block();
 $$
 LANGUAGE sql;
 
