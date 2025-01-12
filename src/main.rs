@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     //     )
     //     .await
     // );
+    println!("PORT: {}", PORT.to_string());
     let addr = (Ipv6Addr::UNSPECIFIED, *PORT);
     if matches!(*ENV, Env::Production) {
         let mut state = AcmeConfig::new(LETS_ENCRYPT_DOMAINS.clone())

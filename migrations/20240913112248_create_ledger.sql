@@ -2,6 +2,11 @@ CREATE TYPE currency AS ENUM(
     'usd'
 );
 
+-- CREATE TYPE account_type AS ENUM(
+--     'user',
+--     'magic_link',
+-- );
+
 CREATE TABLE currencies(
     currency currency PRIMARY KEY,
     decimals smallint
@@ -10,6 +15,7 @@ CREATE TABLE currencies(
 CREATE TABLE accounts(
     id serial PRIMARY KEY,
     address bytea UNIQUE,
+    is_magic_link BOOLEAN,
     nonce bigint NOT NULL DEFAULT 0
 );
 
@@ -64,6 +70,7 @@ CREATE TABLE utxos(
     value bigint NOT NULL
 );
 
+
 CREATE TABLE exchange_rates(
     currency currency,
     block_height int REFERENCES blocks(height),
@@ -84,12 +91,29 @@ CREATE TABLE ledger(
     value bigint NOT NULL
 );
 
+CREATE TABLE magic_links(
+    id bigserial PRIMARY KEY,
+    ledger_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT
+);
+
 CREATE TABLE signatures(
     transaction_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT,
     account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
     nonce bigint,
     signature bytea CHECK (octet_length(signature) = 65)
 );
+
+CREATE FUNCTION account_address(account_id int)
+    RETURNS bytea
+    AS $$
+DECLARE
+    account_address bytea;
+BEGIN
+    SELECT address INTO account_address FROM accounts where accounts.id = account_id;
+    RETURN account_address;
+END;
+$$
+LANGUAGE plpgsql;
 
 CREATE FUNCTION account_id(address_ bytea)
     RETURNS int

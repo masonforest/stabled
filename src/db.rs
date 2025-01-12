@@ -63,7 +63,20 @@ where
                 &claim_utxo_transaction.currency,
             )
             .await?
-        }
+        },
+        Transaction::CreateMagicLink(transaction::CreateMagicLink {
+            currency,
+            value,
+            address,
+        }) => insert_magic_link(pool.clone(), transaction.from_address(), address, &currency, value).await?,
+        Transaction::RedeemMagicLink(transaction::RedeemMagicLink {
+            address,
+            ..
+        }) => redeem_magic_link(
+            pool.clone(),
+            address,
+            transaction.from_address()
+        ).await?,
     };
     insert_signature(
         pool,
@@ -92,20 +105,82 @@ pub async fn insert_transfer<'a, E>(
 where
     E: Executor<'a, Database = Postgres> + Clone,
 {
-    println!("rec:{}", hex::encode(recipient.0));
-    println!("value: {}", value);
     query(
-        "INSERT into ledger (currency, payor_id, recipient_id, value)
-        VALUES ($1, account_id($2), account_id($3), $4)
+        "INSERT into ledger (payor_id, recipient_id, currency, value)
+        VALUES (account_id($1), account_id($2), $3, $4)
         RETURNING id",
     )
-    .bind(&currency)
     .bind(payor)
     .bind(recipient)
+    .bind(&currency)
     .bind(value)
     .fetch_one(pool)
     .await
     .map(|row| row.get("id"))
+}
+
+pub async fn insert_magic_link<'a, E>(
+    pool: E,
+    payor: Address,
+    address: Address,
+    currency: &Currency,
+    value: i64,
+) -> sqlx::Result<i64>
+where
+    E: Executor<'a, Database = Postgres> + Clone,
+{
+    query(
+        "INSERT into accounts (is_magic_link, address)
+        VALUES (TRUE, $1) RETURNING id",
+    )
+    .bind(address)
+    .execute(pool.clone()).await?;
+    insert_transfer(
+        pool.clone(),
+        payor,
+        address,
+        &currency,
+        value,
+    )
+    .await
+}
+
+pub async fn redeem_magic_link<'a, E>(
+    pool: E,
+    address: Address,
+    recipient: Address,
+) -> Result<i64>
+where
+    E: Executor<'a, Database = Postgres> + Clone,
+{
+    let is_magic_link: bool = query("SELECT accounts.is_magic_link FROM ledger
+        JOIN accounts ON accounts.id = ledger.recipient_id
+        WHERE accounts.address = $1")
+        .bind(address)
+        .fetch_one(pool.clone())
+        .await?.get("is_magic_link");
+
+        if !is_magic_link {
+        return Err(crate::Error::Error(
+            "This account is not a magic link account".to_string(),
+        ));
+        };
+    let row = query("SELECT account_address(recipient_id) AS recipient, ledger.* FROM ledger
+        JOIN accounts ON accounts.id = ledger.recipient_id
+        WHERE accounts.address = $1")
+        .bind(address)
+        .fetch_one(pool.clone())
+        .await?;
+        
+
+    insert_transfer(
+        pool.clone(),
+        row.get("recipient"),
+        recipient,
+        &row.get("currency"),
+        row.get("value")
+
+    ).await.map_err(crate::Error::from)
 }
 
 pub async fn insert_signature<'a, E>(

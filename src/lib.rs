@@ -11,15 +11,21 @@ use crate::{
     error::Error,
     transaction::{ClaimUtxo, Currency, Transfer},
 };
+use crate::transaction::RedeemMagicLink;
+use crate::transaction::CreateMagicLink;
+use tower_http::services::ServeDir;
 use ::bitcoin::Network;
+use axum::http::StatusCode;
+use axum::response::Response;
 use axum::{
     body::Bytes,
     extract::State,
     http::{header, method::Method},
-    response::IntoResponse,
+    response::{IntoResponse, Html},
     routing::{get, post},
     Router,
 };
+use askama::Template;
 use borsh::{BorshDeserialize, BorshSerialize};
 #[cfg(test)]
 use k256::ecdsa::SigningKey;
@@ -27,6 +33,13 @@ use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use sqlx::PgPool;
 use std::str::FromStr;
 use tower_http::cors::{Any, CorsLayer};
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct IndexTemplate {
+    create_wallet_button: String,
+}
+
 
 pub async fn app(pool: PgPool) -> Router {
     let cors = CorsLayer::new()
@@ -38,6 +51,9 @@ pub async fn app(pool: PgPool) -> Router {
         .route("/transactions", post(insert_transaction))
         .route("/balances/:currency/:address", get(get_balance))
         .route("/utxos/:address", get(get_utxos))
+        // .route("/magic", get(get_magic))
+        .route("/", get(get_index))
+        .nest_service("/assets", ServeDir::new("templates/assets"))
         .layer(cors)
         .with_state(pool)
 }
@@ -66,8 +82,10 @@ impl From<db::Utxo> for Utxo {
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 enum Transaction {
-    Transfer(Transfer),
     ClaimUtxo(ClaimUtxo),
+    CreateMagicLink(CreateMagicLink),
+    RedeemMagicLink(RedeemMagicLink),
+    Transfer(Transfer),
 }
 impl Transaction {
     #[cfg(test)]
@@ -161,6 +179,27 @@ async fn get_balance(
     .map_err(Error::from)
     .into_response())
 }
+struct HtmlTemplate<T>(T);
+
+impl<T> IntoResponse for HtmlTemplate<T>
+where
+    T: Template,
+{
+    fn into_response(self) -> Response {
+        match self.0.render() {
+            Ok(html) => Html(html).into_response(),
+            Err(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to render template. Error: {err}"),
+            )
+                .into_response(),
+        }
+    }
+}
+async fn get_index() -> axum::response::Result<impl IntoResponse> {
+    let template = IndexTemplate { create_wallet_button: "Create Wallet".to_string() };
+    Ok(HtmlTemplate(template))
+}
 
 async fn get_utxos(
     State(pool): State<PgPool>,
@@ -190,7 +229,7 @@ mod tests {
     use super::*;
     use crate::{
         address::Address,
-        transaction::{Currency, Transfer},
+        transaction::{Currency, Transfer, RedeemMagicLink, CreateMagicLink},
     };
     use ::bitcoin::consensus::Decodable;
     use axum::{
@@ -241,6 +280,10 @@ mod tests {
                 0,
             )
         };
+        pub static ref MAGIC_LINK_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
+        pub static ref MAGIC_LINK_ADDRESS: Address = VerifyingKey::from(MAGIC_LINK_SECRET_KEY.clone())
+            .try_into()
+            .unwrap();
     }
     macro_rules! bitcoin_block {
         ($file_name:expr) => {{
@@ -316,6 +359,76 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn test_magic_link(pool: PgPool) {
+        db::credit(&pool, *ALICE, Currency::Usd, 10000)
+            .await
+            .unwrap();
+        let transaction = Transaction::CreateMagicLink(CreateMagicLink {
+            currency: Currency::Usd,
+            value: 10000,
+            address: *MAGIC_LINK_ADDRESS
+        });
+
+        let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
+        let request = Request::builder()
+            .method("POST")
+            .header("content-type", "application/octet-stream")
+            .uri("/transactions")
+            .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
+            .unwrap();
+
+        // let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+        // let body = response.into_body().collect().await.unwrap().to_bytes();
+        // println!("{:?}", body);
+
+        // assert_eq!(response.status(), StatusCode::OK);
+
+        // // let request = Request::builder()
+        // //     .method("GET")
+        // //     .uri(format!("/magic_links/{}", hex::encode((*ALICE).0)))
+        // //     .body(Body::empty())
+        // //     .unwrap();
+
+        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // let body = response.into_body().collect().await.unwrap().to_bytes();
+        // let magic_link_id = from_slice::<i64>(&body).unwrap(); 
+
+        // let signature = RedeemMagicLink::sign(magic_link_id, *BOB, &MAGIC_LINK_SECRET_KEY); 
+        let transaction = Transaction::RedeemMagicLink(
+            RedeemMagicLink::sign(*MAGIC_LINK_ADDRESS, *BOB, &MAGIC_LINK_SECRET_KEY)
+        );
+
+        let signed_transaction = transaction.sign(0, &BOBS_SECRET_KEY.clone());
+        let request = Request::builder()
+            .method("POST")
+            .header("content-type", "application/octet-stream")
+            .uri("/transactions")
+            .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
+            .unwrap();
+        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/balances/usd/{}", hex::encode((*BOB).0)))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+
+        assert_eq!(from_slice::<i64>(&body).unwrap(), 10000);
+    }
+
+    #[sqlx::test]
     async fn withdraw(pool: PgPool) {
         let server = MockServer::start();
         let bitcoin_rpc_mock =
@@ -327,7 +440,7 @@ mod tests {
                             "method": "sendtoaddress",
                             "params": [
                                 ALICES_BITCOIN_ADDRESS.to_string(),
-                                Decimal::new(1000, 8)
+                                Decimal::new(99995, 8)
                             ]
                         })
                         .to_string(),
