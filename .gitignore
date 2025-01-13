@@ -2,6 +2,7 @@
 .env
 node_modules
 templates
+bun.lockb
 src/frontend/node_modules
 src/frontend/bun.lockdb
 src/frontend/logs

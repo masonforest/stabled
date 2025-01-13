@@ -4,7 +4,7 @@ CREATE TYPE currency AS ENUM(
 
 -- CREATE TYPE account_type AS ENUM(
 --     'user',
---     'magic_link',
+--     'check',
 -- );
 
 CREATE TABLE currencies(
@@ -15,7 +15,7 @@ CREATE TABLE currencies(
 CREATE TABLE accounts(
     id serial PRIMARY KEY,
     address bytea UNIQUE,
-    is_magic_link BOOLEAN,
+    is_check BOOLEAN,
     nonce bigint NOT NULL DEFAULT 0
 );
 
@@ -83,25 +83,32 @@ CREATE TABLE withdrawls(
     value bigint
 );
 
+CREATE TABLE transactions(
+    id bigserial PRIMARY KEY,
+    data bytea
+);
+
 CREATE TABLE ledger(
     id bigserial PRIMARY KEY,
-    currency currency,
+    transaction_id int NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT,
     payor_id int NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
     recipient_id int NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    currency currency,
     value bigint NOT NULL
 );
 
-CREATE TABLE magic_links(
+CREATE TABLE checks(
     id bigserial PRIMARY KEY,
     ledger_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT
 );
 
-CREATE TABLE signatures(
-    transaction_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT,
-    account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-    nonce bigint,
-    signature bytea CHECK (octet_length(signature) = 65)
-);
+
+-- CREATE TABLE signatures(
+--     transaction_id int NOT NULL REFERENCES ledger(id) ON DELETE RESTRICT,
+--     account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+--     nonce bigint,
+--     signature bytea CHECK (octet_length(signature) = 65)
+-- );
 
 CREATE FUNCTION account_address(account_id int)
     RETURNS bytea

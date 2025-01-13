@@ -11,35 +11,35 @@ use crate::{
     error::Error,
     transaction::{ClaimUtxo, Currency, Transfer},
 };
-use crate::transaction::RedeemMagicLink;
-use crate::transaction::CreateMagicLink;
-use tower_http::services::ServeDir;
-use ::bitcoin::Network;
-use axum::http::StatusCode;
-use axum::response::Response;
+
+use crate::transaction::{CashCheck, CreateCheck};
+use askama::Template;
 use axum::{
     body::Bytes,
     extract::State,
-    http::{header, method::Method},
-    response::{IntoResponse, Html},
+    http::{header, method::Method, HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Router,
 };
-use askama::Template;
 use borsh::{BorshDeserialize, BorshSerialize};
 #[cfg(test)]
 use k256::ecdsa::SigningKey;
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+use rust_decimal::Decimal;
 use sqlx::PgPool;
-use std::str::FromStr;
-use tower_http::cors::{Any, CorsLayer};
+use std::{path::Path, process::Command, str::FromStr};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
-    create_wallet_button: String,
+    title: String,
+    amount: Option<i64>,
 }
-
 
 pub async fn app(pool: PgPool) -> Router {
     let cors = CorsLayer::new()
@@ -49,9 +49,10 @@ pub async fn app(pool: PgPool) -> Router {
 
     Router::new()
         .route("/transactions", post(insert_transaction))
-        .route("/balances/:currency/:address", get(get_balance))
-        .route("/utxos/:address", get(get_utxos))
-        // .route("/magic", get(get_magic))
+        .route("/balances/{currency}/{address}", get(get_balance))
+        .route("/utxos/{address}", get(get_utxos))
+        .route("/{transaction_id}", get(get_magic))
+        .route("/images/{amount}", get(get_magic_image))
         .route("/", get(get_index))
         .nest_service("/assets", ServeDir::new("templates/assets"))
         .layer(cors)
@@ -83,8 +84,8 @@ impl From<db::Utxo> for Utxo {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 enum Transaction {
     ClaimUtxo(ClaimUtxo),
-    CreateMagicLink(CreateMagicLink),
-    RedeemMagicLink(RedeemMagicLink),
+    CreateCheck(CreateCheck),
+    CashCheck(CashCheck),
     Transfer(Transfer),
 }
 impl Transaction {
@@ -131,37 +132,11 @@ pub async fn insert_transaction(
     State(pool): State<PgPool>,
     body: Bytes,
 ) -> axum::response::Result<impl IntoResponse> {
-    // println!("hex:{}", hex::encode(body.to_vec()));
     let transaction: SignedTransaction = borsh::from_slice(&body.to_vec()).map_err(Error::from)?;
-    // println!("{}", hex::encode(transaction.from_address().0));
-    db::insert_transaction(&pool, transaction.clone()).await?;
-    match transaction.transaction {
-        Transaction::Transfer(Transfer {
-            currency,
-            to: transaction::Address::Bitcoin(bitcoin_address),
-            value,
-        }) => {
-            // println!("current value: {}", value);
-            let transaction_id = bitcoin::rpc::send_to_address(
-                ::bitcoin::Address::from_str(&bitcoin_address)
-                    .map_err(Error::from)?
-                    .require_network(Network::Bitcoin)
-                    .map_err(Error::from)?,
-                db::currency_to_satoshis(&pool, &currency, value).await?,
-            )
-            .await;
-            return Ok(borsh::to_vec(&transaction_id)
-                .map_err(Error::from)
-                .into_response());
-            // return Ok(borsh::to_vec(&[0u8; 32]).map_err(Error::from)
-            // .into_response())
-        }
-        _ => (),
-    };
-    Ok(borsh::to_vec(&[0u8; 32].to_vec())
-        .map_err(Error::from)
-        .into_response())
-    // Ok(vec![].into_response())
+    let transaction_id = db::run_transaction(pool.clone(), transaction.clone())
+        .await
+        .map_err(Error::from)?;
+    Ok(borsh::to_vec(&transaction_id).map_err(Error::from)?)
 }
 
 async fn get_balance(
@@ -196,8 +171,65 @@ where
         }
     }
 }
+
 async fn get_index() -> axum::response::Result<impl IntoResponse> {
-    let template = IndexTemplate { create_wallet_button: "Create Wallet".to_string() };
+    let template = IndexTemplate {
+        title: "Create Wallet".to_string(),
+        amount: None,
+    };
+    Ok(HtmlTemplate(template))
+}
+
+async fn get_magic_image(
+    axum::extract::Path(file_name): axum::extract::Path<String>,
+) -> axum::response::Result<impl IntoResponse> {
+    let amount: i64 = Path::new(&file_name)
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "image/png;".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename={}", file_name)
+            .parse()
+            .unwrap(),
+    );
+
+    let mut input = Command::new("magick");
+    input.arg("-gravity");
+    input.arg("center");
+    input.arg("-background");
+    input.arg("green");
+    input.arg("-fill");
+    input.arg("white");
+    input.arg("-font");
+    input.arg("src/fonts/Roboto-Bold.ttf");
+    input.arg("-pointsize");
+    input.arg("180");
+    input.arg("-size");
+    input.arg("900x556");
+
+    input.arg(format!("label:${}", Decimal::new(amount, 2)));
+    input.arg("PNG:-");
+    Ok((headers, input.output().unwrap().stdout))
+}
+
+async fn get_magic(
+    State(pool): State<PgPool>,
+    axum::extract::Path(transaction_id): axum::extract::Path<i64>,
+) -> axum::response::Result<impl IntoResponse> {
+    let ledger_entry = db::get_ledger_entry(&pool, transaction_id).await?;
+    let template = IndexTemplate {
+        title: format!(
+            "${} on the Stable Network",
+            Decimal::new(ledger_entry.value, 2)
+        ),
+        amount: Some(ledger_entry.value),
+    };
     Ok(HtmlTemplate(template))
 }
 
@@ -229,7 +261,7 @@ mod tests {
     use super::*;
     use crate::{
         address::Address,
-        transaction::{Currency, Transfer, RedeemMagicLink, CreateMagicLink},
+        transaction::{CashCheck, CreateCheck, Currency, Transfer},
     };
     use ::bitcoin::consensus::Decodable;
     use axum::{
@@ -280,8 +312,8 @@ mod tests {
                 0,
             )
         };
-        pub static ref MAGIC_LINK_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
-        pub static ref MAGIC_LINK_ADDRESS: Address = VerifyingKey::from(MAGIC_LINK_SECRET_KEY.clone())
+        pub static ref CHECK_SECRET_KEY: SigningKey = SigningKey::random(&mut OsRng);
+        pub static ref CHECK_ADDRESS: Address = VerifyingKey::from(CHECK_SECRET_KEY.clone())
             .try_into()
             .unwrap();
     }
@@ -359,14 +391,14 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_magic_link(pool: PgPool) {
+    async fn test_check(pool: PgPool) {
         db::credit(&pool, *ALICE, Currency::Usd, 10000)
             .await
             .unwrap();
-        let transaction = Transaction::CreateMagicLink(CreateMagicLink {
+        let transaction = Transaction::CreateCheck(CreateCheck {
             currency: Currency::Usd,
             value: 10000,
-            address: *MAGIC_LINK_ADDRESS
+            signer: *CHECK_ADDRESS,
         });
 
         let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
@@ -385,21 +417,23 @@ mod tests {
 
         // // let request = Request::builder()
         // //     .method("GET")
-        // //     .uri(format!("/magic_links/{}", hex::encode((*ALICE).0)))
+        // //     .uri(format!("/checks/{}", hex::encode((*ALICE).0)))
         // //     .body(Body::empty())
         // //     .unwrap();
 
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
 
-        assert_eq!(response.status(), StatusCode::OK);
+        let transaction_id = from_slice::<i64>(&body).unwrap();
+
+        // assert_eq!(response.status(), StatusCode::OK);
 
         // let body = response.into_body().collect().await.unwrap().to_bytes();
-        // let magic_link_id = from_slice::<i64>(&body).unwrap(); 
+        // println!("{:?}", body);
 
-        // let signature = RedeemMagicLink::sign(magic_link_id, *BOB, &MAGIC_LINK_SECRET_KEY); 
-        let transaction = Transaction::RedeemMagicLink(
-            RedeemMagicLink::sign(*MAGIC_LINK_ADDRESS, *BOB, &MAGIC_LINK_SECRET_KEY)
-        );
+        // let signature = CashCheck::sign(check_id, *BOB, &CHECK_SECRET_KEY);
+        let transaction =
+            Transaction::CashCheck(CashCheck::sign(transaction_id, *BOB, &CHECK_SECRET_KEY));
 
         let signed_transaction = transaction.sign(0, &BOBS_SECRET_KEY.clone());
         let request = Request::builder()
@@ -409,9 +443,9 @@ mod tests {
             .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
             .unwrap();
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+        // let body = response.into_body().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), StatusCode::OK);
-
 
         let request = Request::builder()
             .method("GET")
@@ -480,7 +514,6 @@ mod tests {
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
 
         // let body = response.into_body().collect().await.unwrap().to_bytes();
-        // println!("{:?}", body);
         assert_eq!(response.status(), StatusCode::OK);
         bitcoin_rpc_mock.assert();
 
@@ -514,3 +547,33 @@ mod tests {
     //         .unwrap();
     // }
 }
+// #[cfg(test)]
+// macro_rules! bitcoin_block {
+//     ($file_name:expr) => {{
+//         let mut file = File::open(concat!(
+//             env!("CARGO_MANIFEST_DIR"),
+//             "/src/test_data/",
+//             $file_name
+//         ))
+//         .unwrap();
+//         let mut data = Vec::new();
+//         file.read_to_end(&mut data).unwrap();
+
+//         ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
+//     }};
+// }
+
+// #[sqlx::test]
+// async fn test_claim_utxo(pool: PgPool) {
+//     db::credit(&pool, *NODE_ADDRESS, Currency::Usd, i32::MAX as i64)
+//         .await
+//         .unwrap();
+//     let block = bitcoin_block!("deposit-block-877380.block");
+//     insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
+//         .await
+//         .unwrap();
+//     claim_utxo(&pool, 0, *BURNS, TEST_UTXO.0, TEST_UTXO.1, &Currency::Usd)
+//         .await
+//         .unwrap();
+//     assert_eq!(get_balance(&pool, *BURNS, Currency::Usd).await.unwrap(), 100)
+// }

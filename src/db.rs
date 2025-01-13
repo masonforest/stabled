@@ -2,13 +2,13 @@ use crate::{
     address::{script_buf_to_address, Address},
     bitcoin::multi_sig,
     constants::{PUBLIC_IP, PUBLIC_KEY, SYSTEM_ADDRESS},
-    error::Result,
+    error::{Error, Result},
     transaction::{self, Currency},
     SignedTransaction, Transaction,
 };
 use bitcoin::{BlockHash, Network, TxOut};
 use log::info;
-use sqlx::{query, query_as, Executor, Postgres, Row};
+use sqlx::{query, query_as, Executor, PgPool, Postgres, Row};
 use std::{collections::HashMap, net::IpAddr, str::FromStr};
 
 #[cfg(test)]
@@ -29,19 +29,21 @@ where
         .await?;
     Ok(())
 }
+pub async fn run_transaction(pool: PgPool, transaction: SignedTransaction) -> Result<i64> {
+    let mut tx = pool.clone().begin().await.map_err(Error::from)?;
+    let transaction_id = insert_transaction(&mut *tx, &transaction)
+        .await
+        .map_err(Error::from)?;
 
-pub async fn insert_transaction<'a, E>(pool: E, transaction: SignedTransaction) -> Result<()>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    let transaction_id = match transaction.transaction.clone() {
+    match transaction.transaction.clone() {
         Transaction::Transfer(transaction::Transfer {
-            currency,
             to: transaction::Address::Stable(to),
+            currency,
             value,
         }) => {
             insert_transfer(
-                pool.clone(),
+                &mut *tx,
+                transaction_id,
                 transaction.from_address(),
                 to,
                 &currency,
@@ -51,65 +53,157 @@ where
         }
         Transaction::Transfer(transaction::Transfer {
             currency,
-            to: transaction::Address::Bitcoin(_),
+            to: transaction::Address::Bitcoin(bitcoin_address),
             value,
-        }) => burn(pool.clone(), transaction.from_address(), currency, value).await?,
+        }) => {
+            burn(
+                &mut *tx,
+                transaction_id,
+                transaction.from_address(),
+                &currency,
+                value,
+            )
+            .await?;
+            let _bitcoin_transaction_id = crate::bitcoin::rpc::send_to_address(
+                ::bitcoin::Address::from_str(&bitcoin_address)
+                    .map_err(Error::from)?
+                    .require_network(Network::Bitcoin)
+                    .map_err(Error::from)?,
+                currency_to_satoshis(&pool, &currency, value).await?,
+            )
+            .await;
+            0
+        }
         Transaction::ClaimUtxo(ref claim_utxo_transaction) => {
             claim_utxo(
-                pool.clone(),
+                &pool.clone(),
+                transaction_id,
                 transaction.from_address(),
                 claim_utxo_transaction.transaction_id,
                 claim_utxo_transaction.vout,
                 &claim_utxo_transaction.currency,
             )
             .await?
-        },
-        Transaction::CreateMagicLink(transaction::CreateMagicLink {
+        }
+        Transaction::CreateCheck(transaction::CreateCheck {
+            signer,
             currency,
             value,
-            address,
-        }) => insert_magic_link(pool.clone(), transaction.from_address(), address, &currency, value).await?,
-        Transaction::RedeemMagicLink(transaction::RedeemMagicLink {
-            address,
+        }) => {
+            // query(
+            //     "INSERT into accounts (is_check, address)
+            //     VALUES (TRUE, $1) RETURNING id",
+            // )
+            // .bind(address)
+            // .execute(&mut *tx).await?;
+            insert_transfer(
+                &mut *tx,
+                transaction_id,
+                transaction.from_address(),
+                signer,
+                &currency,
+                value,
+            )
+            .await
+            .map_err(crate::Error::from)?
+            // let check_id = insert_check(&mut *tx, transaction_id, transaction.from_address(), address, &currency, value).await?;
+            // return Ok(Some(check_id))
+        }
+        Transaction::CashCheck(transaction::CashCheck {
+            transaction_id: check_transaction_id,
             ..
-        }) => redeem_magic_link(
-            pool.clone(),
-            address,
-            transaction.from_address()
-        ).await?,
+        }) => {
+            // let is_check: bool = query("SELECT accounts.is_check FROM ledger
+            //     JOIN accounts ON accounts.id = ledger.recipient_id
+            //     WHERE accounts.address = $1")
+            //     .bind(signer)
+            //     .fetch_one(&mut *tx)
+            //     .await?.get("is_check");
+
+            //     if !is_check {
+            //     return Err(crate::Error::Error(
+            //         "This account is not a magic link account".to_string(),
+            //     ));
+            //     };
+            let row = query(
+                "SELECT account_address(recipient_id) AS recipient, ledger.* FROM ledger
+        JOIN accounts ON accounts.id = ledger.recipient_id
+        WHERE ledger.transaction_id = $1",
+            )
+            .bind(check_transaction_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            insert_transfer(
+                &mut *tx,
+                transaction_id,
+                row.get("recipient"),
+                transaction.from_address(),
+                &row.get("currency"),
+                row.get("value"),
+            )
+            .await
+            .map_err(crate::Error::from)?
+        }
     };
-    insert_signature(
+    tx.commit().await.map_err(Error::from)?;
+
+    return Ok(transaction_id);
+}
+pub async fn burn<'a, E>(
+    pool: E,
+    transaction_id: i64,
+    payor: Address,
+    currency: &Currency,
+    value: i64,
+) -> Result<i64>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    Ok(insert_transfer(
         pool,
         transaction_id,
-        transaction.from_address(),
-        transaction.nonce,
-        transaction.signature,
+        payor,
+        SYSTEM_ADDRESS,
+        &currency,
+        value,
     )
-    .await?;
+    .await?)
+}
 
-    Ok(())
-}
-pub async fn burn<'a, E>(pool: E, payor: Address, currency: Currency, value: i64) -> sqlx::Result<i64>
+pub async fn insert_transaction<'a, E>(pool: E, transaction: &SignedTransaction) -> Result<i64>
 where
-    E: Executor<'a, Database = Postgres> + Clone,
+    E: Executor<'a, Database = Postgres>,
 {
-    Ok(insert_transfer(pool.clone(), payor, SYSTEM_ADDRESS, &currency, value).await?)
+    query(
+        "INSERT into transactions (data)
+        VALUES ($1)
+        RETURNING id",
+    )
+    .bind(borsh::to_vec(transaction)?)
+    .fetch_one(pool)
+    .await
+    .map(|row| row.get("id"))
+    .map_err(crate::Error::from)
 }
+
 pub async fn insert_transfer<'a, E>(
     pool: E,
+    transaction_id: i64,
     payor: Address,
     recipient: Address,
     currency: &Currency,
     value: i64,
-) -> sqlx::Result<i64>
+) -> Result<i64>
 where
-    E: Executor<'a, Database = Postgres> + Clone,
+    E: Executor<'a, Database = Postgres>,
 {
     query(
-        "INSERT into ledger (payor_id, recipient_id, currency, value)
-        VALUES (account_id($1), account_id($2), $3, $4)
+        "INSERT into ledger (transaction_id, payor_id, recipient_id, currency, value)
+        VALUES ($1, account_id($2), account_id($3), $4, $5)
         RETURNING id",
     )
+    .bind(transaction_id)
     .bind(payor)
     .bind(recipient)
     .bind(&currency)
@@ -117,71 +211,32 @@ where
     .fetch_one(pool)
     .await
     .map(|row| row.get("id"))
+    .map_err(crate::Error::from)
 }
 
-pub async fn insert_magic_link<'a, E>(
-    pool: E,
-    payor: Address,
-    address: Address,
-    currency: &Currency,
-    value: i64,
-) -> sqlx::Result<i64>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    query(
-        "INSERT into accounts (is_magic_link, address)
-        VALUES (TRUE, $1) RETURNING id",
-    )
-    .bind(address)
-    .execute(pool.clone()).await?;
-    insert_transfer(
-        pool.clone(),
-        payor,
-        address,
-        &currency,
-        value,
-    )
-    .await
-}
+// pub async fn insert_check<'a, E>(
+//     pool: E,
+//     transaction_id: i64,
+//     payor: Address,
+//     address: Address,
+//     currency: &Currency,
+//     value: i64,
+// ) -> Result<i64>
+// where
+//     E: Executor<'a, Database = Postgres>,
+// {
+// }
 
-pub async fn redeem_magic_link<'a, E>(
-    pool: E,
-    address: Address,
-    recipient: Address,
-) -> Result<i64>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    let is_magic_link: bool = query("SELECT accounts.is_magic_link FROM ledger
-        JOIN accounts ON accounts.id = ledger.recipient_id
-        WHERE accounts.address = $1")
-        .bind(address)
-        .fetch_one(pool.clone())
-        .await?.get("is_magic_link");
-
-        if !is_magic_link {
-        return Err(crate::Error::Error(
-            "This account is not a magic link account".to_string(),
-        ));
-        };
-    let row = query("SELECT account_address(recipient_id) AS recipient, ledger.* FROM ledger
-        JOIN accounts ON accounts.id = ledger.recipient_id
-        WHERE accounts.address = $1")
-        .bind(address)
-        .fetch_one(pool.clone())
-        .await?;
-        
-
-    insert_transfer(
-        pool.clone(),
-        row.get("recipient"),
-        recipient,
-        &row.get("currency"),
-        row.get("value")
-
-    ).await.map_err(crate::Error::from)
-}
+// pub async fn redeem_check<'a, E>(
+//     pool: E,
+//     transaction_id: i64,
+//     address: Address,
+//     recipient: Address,
+// ) -> Result<i64>
+// where
+//     E: Executor<'a, Database = Postgres> + Clone,
+// {
+// }
 
 pub async fn insert_signature<'a, E>(
     pool: E,
@@ -213,10 +268,20 @@ pub struct Utxo {
     pub vout: i32,
     pub value: i64,
 }
+
+#[derive(sqlx::FromRow, sqlx::Type)]
+pub struct LedgerEntry {
+    pub payor: Vec<u8>,
+    pub recipient: Vec<u8>,
+    pub currency: Currency,
+    pub value: i64,
+}
+
 pub async fn claim_utxo<'a, E>(
     pool: E,
+    transaction_id: i64,
     address: Address,
-    transaction_id: [u8; 32],
+    bitcoin_transaction_id: [u8; 32],
     vout: i32,
     currency: &Currency,
 ) -> Result<i64>
@@ -231,7 +296,7 @@ where
         account_id = account_id($1) AND transaction_id = $2 AND vout = $3 AND redeemed = false
         RETURNING transaction_id, vout, value",
         &address.0,
-        &transaction_id,
+        &bitcoin_transaction_id,
         vout
     )
     .fetch_optional(pool.clone())
@@ -239,13 +304,13 @@ where
 
     if let Some(utxo) = maybe_utxo {
         return Ok(query(
-            "INSERT into ledger (currency, payor_id, recipient_id, value)
-            VALUES ($1, system_address(), account_id($2), satoshis_to_currency($1, $3))
+            "INSERT into ledger (transaction_id, payor_id, recipient_id, currency, value)
+            VALUES ($1, system_address(), account_id($2), $3, satoshis_to_currency($3, $4))
             RETURNING id",
         )
-        .bind(&currency)
-        // .bind(*NODE_ADDRESS)
+        .bind(transaction_id)
         .bind(address)
+        .bind(&currency)
         .bind(utxo.value)
         .fetch_one(pool)
         .await
@@ -500,6 +565,18 @@ where
             .collect(),
     )
 }
+
+pub async fn get_ledger_entry<'a, E>(pool: E, transaction_id: i64) -> Result<LedgerEntry>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    Ok(
+        query_as("SELECT account_address(payor_id) as payor, account_address(recipient_id) as recipient, currency, value  from ledger WHERE transaction_id = $1")
+            .bind(transaction_id)
+            .fetch_one(pool)
+            .await?
+    )
+}
 #[cfg(test)]
 pub async fn test_get_balance<'a, E>(pool: E, address: Address, currency: Currency) -> Result<i64>
 where
@@ -513,47 +590,4 @@ where
     .fetch_one(pool)
     .await?
     .get("value"))
-}
-
-#[cfg(test)]
-macro_rules! bitcoin_block {
-    ($file_name:expr) => {{
-        let mut file = File::open(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/test_data/",
-            $file_name
-        ))
-        .unwrap();
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).unwrap();
-
-        ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
-    }};
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        constants::NODE_ADDRESS,
-        db,
-        tests::{BURNS, TEST_UTXO},
-    };
-    use ::bitcoin::consensus::Decodable;
-    use sqlx::PgPool;
-    use std::{fs::File, io::Read};
-
-    #[sqlx::test]
-    async fn test_claim_utxo(pool: PgPool) {
-        db::credit(&pool, *NODE_ADDRESS, Currency::Usd, i32::MAX as i64)
-            .await
-            .unwrap();
-        let block = bitcoin_block!("deposit-block-877380.block");
-        insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
-            .await
-            .unwrap();
-        claim_utxo(&pool, *BURNS, TEST_UTXO.0, TEST_UTXO.1, &Currency::Usd)
-            .await
-            .unwrap();
-        assert_eq!(get_balance(&pool, *BURNS, Currency::Usd).await.unwrap(), 100)
-    }
 }

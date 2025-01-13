@@ -12,6 +12,7 @@ import Send from "./Send";
 import Withdraw from "./Withdraw";
 import Loading from "./Loading";
 import SideNav from "./SideNav";
+import MagicLink from "./MagicLink";
 import * as secp256k1 from "@noble/secp256k1";
 import { useInterval } from "react-use";
 import { QRCodeSVG } from "qrcode.react";
@@ -48,6 +49,9 @@ let USD = new Intl.NumberFormat("en-US", {
 });
 
 function formatUsd(value) {
+  if (!value) {
+    return;
+  }
   let USD = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -65,98 +69,33 @@ function formatBtc(value) {
   );
 }
 
-export const stable = new StableNetwork({ development: import.meta.env.DEV });
+export const stable = new StableNetwork({
+  development: import.meta.env.DEV
+});
 
 function App() {
-  const [entropy, setEntropy] = useState();
   const [magicEntropy, setMagicEntropy] = useState();
-  const [inputValue, setInputValue] = useState("");
-  const [MagicLink, setMagicLink] = useState(null);
-  const [magicLinkBalance, setMagicLinkBalance] = useState(0n);
+  const [checkBalance, setCheckBalance] = useState();
+  const [magicLink, setMagicLink] = useState(null);
 
   const [usdBalance, setUsdBalance] = useState();
   const [utxos, setUtxos] = useState([]);
-  const handleChange = (event) => {
-    setInputValue(event.target.value);
-  };
-  const sweepMagicLink = useCallback(() => {
-    (async () => {
-      const { privateKey, publicKey: temporaryPublicKey } =
-        HDKey.fromMasterSeed(
-          base64urlnopad.decode(window.location.hash.slice(1)),
-        ).derive("m/84'/0'/0");
-      let toEntropy = localStorage.entropy
-        ? new Uint8Array(Buffer.from(localStorage.entropy, "base64"))
-        : randomBytes(16);
-      const { publicKey } =
-        HDKey.fromMasterSeed(toEntropy).derive("m/84'/0'/0");
-      let value = await stable.getBalance(
-        pubKeyToBytes(temporaryPublicKey),
-        "usd",
-      );
-      const transaction = {
-        nonce: 0,
-        transaction: {
-          Transfer: {
-            currency: { Usd: {} },
-            to: { StableAddress: pubKeyToBytes(publicKey) },
-            value,
-          },
-        },
-      };
-      const serliaizedTransaction = borshSerialize(
-        transactionSchema,
-        transaction,
-      );
-      const signature = secp256k1.sign(
-        sha256(serliaizedTransaction),
-        privateKey,
-      );
-      let serialized = borshSerialize(signedTransactionSchema, {
-        transaction: transaction.transaction,
-        nonce: transaction.nonce,
-        signature: secp256k1.etc.concatBytes(
-          signature.toCompactRawBytes(),
-          new Uint8Array([signature.recovery]),
-        ),
-      });
-      await stable.postRawTransaction(serialized);
-      window.location = `/#${base64urlnopad.encode(toEntropy)}`;
-    })();
-  }, []);
 
-  useEffect(() => {
-    setEntropy(Buffer.from(window.location.hash.slice(1), "base64"))
-  //   if (window.location.pathname == "/magic") {
-  //     setMagicEntropy(base64urlnopad.decode(window.location.hash.slice(1)));
-  //     return;
-  //   }
-  //   if (window.location.hash.slice(1)) {
-  //     setEntropy(Buffer.from(window.location.hash.slice(1), "base64"));
-  //   } else {
-  //     if (localStorage.entropy) {
-  //       window.location = `/#${localStorage.entropy}`;
-  //       setEntropy(Buffer.from(localStorage.entropy, "base64"));
-  //     } else {
-  //       const newEntropy = Buffer.from(randomBytes(16)).toString("base64");
-  //       localStorage.entropy = newEntropy;
-  //       window.location = `/#${newEntropy}`;
-  //       setEntropy(Buffer.from(newEntropy, "base64"));
-  //     }
-  //   }
-  }, []);
-  const { publicKey, privateKey } = useMemo(() => {
-    if (!entropy) {
-      return {};
-    }
-    return HDKey.fromMasterSeed(entropy).derive("m/84'/0'/0");
-  }, [entropy]);
+  const { publicKey, privateKey } = useMemo(
+    () =>
+      HDKey.fromMasterSeed(Buffer.from(localStorage.entropy, "base64")).derive(
+        "m/84'/0'/0",
+      ),
+    [],
+  );
   useInterval(
     async () => {
       if (!publicKey) {
         return;
       }
+      // console.log(Buffer.from(pubKeyToBytes(publicKey)).toString("hex"))
       let usdBalance = await stable.getBalance(pubKeyToBytes(publicKey), "usd");
+      // console.log(usdBalance)
       setUsdBalance(usdBalance);
     },
     1000,
@@ -168,20 +107,27 @@ function App() {
     [publicKey],
   );
 
-  useInterval(
-    async () => {
-      if (!magicEntropy) {
+  useEffect(() => {
+    async function setCheckBalance2() {
+      const magicTransactionId = parseInt(window.location.pathname.slice(1));
+      const isMagicLink = Number.isInteger(magicTransactionId);
+      console.log(isMagicLink);
+      if (!isMagicLink) {
         return;
       }
-      const { publicKey: temporaryPublicKey } =
-        HDKey.fromMasterSeed(magicEntropy).derive("m/84'/0'/0");
-      setMagicLinkBalance(
-        await stable.getBalance(pubKeyToBytes(temporaryPublicKey), "usd"),
+      const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
+      // console.log(checkEntropy)
+      const { publicKey: checkPublicKey } =
+        HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
+      alert("getting check balance");
+      setCheckBalance(
+        await stable.getBalance(pubKeyToBytes(checkPublicKey), "usd"),
       );
-    },
-    1000,
-    [magicEntropy],
-  );
+    }
+
+    console.log("calling");
+    setCheckBalance2();
+  }, []);
 
   useInterval(
     async () => {
@@ -196,46 +142,17 @@ function App() {
     1000,
     [publicKey],
   );
-
-  async function send(e) {
-    e.preventDefault();
-    let temporaryEntropy = randomBytes(16);
-    const { publicKey: temporaryPublicKey } =
-      HDKey.fromMasterSeed(temporaryEntropy).derive("m/84'/0'/0");
-
-    const value = Math.round(parseFloat(inputValue * 100));
-    const transaction = {
-      nonce: 0,
-      transaction: {
-        Transfer: {
-          currency: { Usd: {} },
-          to: { StableAddress: pubKeyToBytes(temporaryPublicKey) },
-          value,
-        },
-      },
-    };
-    const serliaizedTransaction = borshSerialize(
-      transactionSchema,
-      transaction,
-    );
-    const signature = secp256k1.sign(sha256(serliaizedTransaction), privateKey);
-    let serialized = borshSerialize(signedTransactionSchema, {
-      transaction: transaction.transaction,
-      nonce: transaction.nonce,
-      signature: secp256k1.etc.concatBytes(
-        signature.toCompactRawBytes(),
-        new Uint8Array([signature.recovery]),
-      ),
-    });
-    stable.postRawTransaction(serialized);
-
-    // console.log(
-    //   `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/magic#${base64urlnopad.encode(temporaryEntropy)}`,
-    // );
-    setMagicLink(
-      `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/magic#${base64urlnopad.encode(temporaryEntropy)}`,
-    );
+  async function cashCheck() {
+    const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
+    const { privateKey: checkPrivateKey } =
+      HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
+    console.log(checkPrivateKey);
+    const checkTransactionId = parseInt(window.location.pathname.slice(1));
+    await stable.cashCheck(checkTransactionId, checkPrivateKey, privateKey);
+    history.pushState({}, "", `/#${localStorage.entropy}`);
+    setCheckBalance(undefined);
   }
+
   async function claimUtxo(utxo) {
     const transaction = {
       nonce: 0,
@@ -265,218 +182,172 @@ function App() {
 
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
 
-  const isLoading = useMemo(() => [usdBalance].some((value) => typeof value === "undefined"), [usdBalance] )
-  return (isLoading?
-      <Loading></Loading>:
-      <div className="wrapper">
-        <header className="top-header fixed-top border-bottom d-flex align-items-center">
-          <nav className="navbar navbar-expand w-100 p-0 gap-3 align-items-center">
-            <div
-              className="nav-button"
-              data-bs-toggle="offcanvas"
-              data-bs-target="#offcanvasSidenav"
-            >
-              <a href="#">
-                <i className="bi bi-list"></i>
-              </a>
+  const isLoading = useMemo(
+      () => [usdBalance].some((value) => typeof value === "undefined"),
+      [usdBalance],
+    );
+  return isLoading ? (
+    <Loading></Loading>
+  ) : (
+    <div className="wrapper">
+      <header className="top-header fixed-top border-bottom d-flex align-items-center">
+        <nav className="navbar navbar-expand w-100 p-0 gap-3 align-items-center">
+          <div
+            className="nav-button"
+            data-bs-toggle="offcanvas"
+            data-bs-target="#offcanvasSidenav"
+          >
+            <a href="#">
+              <i className="bi bi-list"></i>
+            </a>
+          </div>
+          <div className="brand-logo">Stable Network Wallet</div>
+          <form className="searchbar">
+            <div className="position-absolute top-50 translate-middle-y search-icon start-0">
+              <i className="bi bi-search"></i>
             </div>
-            <div className="brand-logo">Stable Network Wallet</div>
-            <form className="searchbar">
-              <div className="position-absolute top-50 translate-middle-y search-icon start-0">
-                <i className="bi bi-search"></i>
-              </div>
-              <input
-                className="form-control px-5"
-                type="text"
-                placeholder="Search for anything"
-              />
-              <div className="position-absolute top-50 translate-middle-y end-0 search-close-icon">
-                <i className="bi bi-x-lg"></i>
-              </div>
-            </form>
-          </nav>
-        </header>
-        <div className="page-content">
-          <h1></h1>
-          <Tab.Container id="left-tabs-example" defaultActiveKey="send">
-            <Tab.Content>
-              <Tab.Pane eventKey="deposit">
-                {" "}
-                <Deposit />
-              </Tab.Pane>
-              <Tab.Pane eventKey="withdraw">
-                {" "}
-                <Withdraw />
-              </Tab.Pane>
-              <Tab.Pane eventKey="magic-link">
-                {address}
-                <h4 className="my-2 text-center fw-bold section-title">
-                  {" "}
-                  Balance: {formatUsd(usdBalance)}
-                </h4>
-                <form onSubmit={send}>
-                  <div className="form-floating">
-                    <input
-                      onChange={handleChange}
-                      value={inputValue}
-                      type="text"
-                      className="form-control rounded-3"
-                      id="floatingInputName"
-                      placeholder="Name"
-                    />
-                    <label htmlFor="floatingInputName">Amount</label>
-                  </div>
-                  <input
-                    className="btn btn-success w-100 mt-4"
-                    type="submit"
-                    value="Create Magic Payment Link"
-                  />
-                </form>
-                {MagicLink && (
-                  <>
-                    <div className="d-flex flex-row mt-2">
-                      <input
-                        className="form-control rounded-3"
-                        value={MagicLink}
-                        readOnly
-                      />
-                      <CopyToClipboardButton text={MagicLink} />
-                      <button
-                        className="btn btn-secondary mx-2"
-                        onClick={() => setShowQrCodeModal(true)}
-                      >
-                        Show QR Code
-                      </button>
-                    </div>
-                  </>
-                )}
-              </Tab.Pane>
-              <Tab.Pane eventKey="send">
-                <Send
-                  address={address}
-                  usdBalance={usdBalance}
-                  privateKey={privateKey}
-                />
-              </Tab.Pane>
-            </Tab.Content>
-            <footer className="page-footer fixed-bottom border-top d-flex align-items-center">
-              <nav className="navbar navbar-expand p-0 flex-grow-1">
-                <div className="navbar-nav align-items-center justify-content-between w-100">
-                  <Nav.Link eventKey="history">
-                    <div className="d-flex flex-column align-items-center">
-                      <div className="icon">
-                        <i className="bi bi-receipt"></i>
-                      </div>
-                      <div className="name">History</div>
-                    </div>
-                  </Nav.Link>
-                  <Nav.Link eventKey="magic-link">
-                    <div className="d-flex flex-column align-items-center">
-                      <div className="icon">
-                        <i className="bi bi-magic"></i>
-                      </div>
-                      <div className="name">Magic Link</div>
-                    </div>
-                  </Nav.Link>
-                  <Nav.Link eventKey="send">
-                    <div className="d-flex flex-column align-items-center">
-                      <div className="icon">
-                        <i className="bi bi-arrow-up-right-square"></i>
-                      </div>
-                      <div className="name">Send</div>
-                    </div>
-                  </Nav.Link>
-                </div>
-              </nav>
-            </footer>
-          </Tab.Container>
-        </div>
-        <Modal
-          show={showQrCodeModal}
-          fullscreen={"md-down"}
-          onHide={() => {
-            setShowQrCodeModal(false);
-            setInputValue("");
-          }}
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>
-              Sending{" "}
-              {inputValue &&
-                formatUsd(BigInt((parseFloat(inputValue) || 0) * 100))}
-              ...
-            </Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <QRCodeSVG
-              width="100%"
-              height="100%"
-              size={400}
-              value={MagicLink}
+            <input
+              className="form-control px-5"
+              type="text"
+              placeholder="Search for anything"
             />
-          </Modal.Body>
-        </Modal>
+            <div className="position-absolute top-50 translate-middle-y end-0 search-close-icon">
+              <i className="bi bi-x-lg"></i>
+            </div>
+          </form>
+        </nav>
+      </header>
+      <div className="page-content">
+        <h1></h1>
+        <Tab.Container id="left-tabs-example" defaultActiveKey="magic-link">
+          <Tab.Content>
+            <Tab.Pane eventKey="deposit">
+              {" "}
+              <Deposit />
+            </Tab.Pane>
+            <Tab.Pane eventKey="withdraw">
+              {" "}
+              <Withdraw />
+            </Tab.Pane>
+            <Tab.Pane eventKey="magic-link">
+              <MagicLink
+                address={address}
+                usdBalance={usdBalance}
+                privateKey={privateKey}
+                setShowQrCodeModal={setShowQrCodeModal}
+                magicLink={magicLink}
+                setMagicLink={setMagicLink}
+              />
+            </Tab.Pane>
+            <Tab.Pane eventKey="send">
+              <Send
+                address={address}
+                usdBalance={usdBalance}
+                privateKey={privateKey}
+              />
+            </Tab.Pane>
+          </Tab.Content>
+          <footer className="page-footer fixed-bottom border-top d-flex align-items-center">
+            <nav className="navbar navbar-expand p-0 flex-grow-1">
+              <div className="navbar-nav align-items-center justify-content-between w-100">
+                <Nav.Link eventKey="history">
+                  <div className="d-flex flex-column align-items-center">
+                    <div className="icon">
+                      <i className="bi bi-receipt"></i>
+                    </div>
+                    <div className="name">History</div>
+                  </div>
+                </Nav.Link>
+                <Nav.Link eventKey="magic-link">
+                  <div className="d-flex flex-column align-items-center">
+                    <div className="icon">
+                      <i className="bi bi-magic"></i>
+                    </div>
+                    <div className="name">Magic Link</div>
+                  </div>
+                </Nav.Link>
+                <Nav.Link eventKey="send">
+                  <div className="d-flex flex-column align-items-center">
+                    <div className="icon">
+                      <i className="bi bi-arrow-up-right-square"></i>
+                    </div>
+                    <div className="name">Send</div>
+                  </div>
+                </Nav.Link>
+              </div>
+            </nav>
+          </footer>
+        </Tab.Container>
+      </div>
+      <Modal
+        show={showQrCodeModal}
+        fullscreen={"md-down"}
+        onHide={() => {
+          setShowQrCodeModal(false);
+          setInputValue("");
+        }}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Sending ...</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <QRCodeSVG width="100%" height="100%" size={400} value={magicLink} />
+        </Modal.Body>
+      </Modal>
 
-        <Modal
-          show={magicEntropy}
-          fullscreen={"md-down"}
-          onHide={() => setShowQrCodeModal(false)}
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>Sending...</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <button
-              onClick={() => sweepMagicLink()}
-              className="btn btn-success btn-xlg w-100"
+      <Modal show={checkBalance} fullscreen={"md-down"}>
+        <Modal.Header closeButton>
+          <Modal.Title>Sending...</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <button
+            onClick={() => cashCheck()}
+            className="btn btn-success btn-xlg w-100"
+          >
+            <title>Accept {formatUsd(checkBalance)}</title>
+            Accept {formatUsd(checkBalance)}
+          </button>
+        </Modal.Body>
+      </Modal>
+      <Modal
+        show={utxos.length}
+        fullscreen={"md-down"}
+        onHide={() => setUtxos([])}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Claim Bitcoin Payment</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p>
+            A payment was made to you in Bitcoin transaction{" "}
+            <a
+              target="_blank"
+              href={`https://mempool.space/tx/${utxos[0] && Buffer.from(utxos[0].transaction_id).toString("hex")}?mode=details`}
             >
-              <title>
-                Accept {formatUsd(magicLinkBalance)} on the Stable Network
-              </title>
-              Accept {formatUsd(magicLinkBalance)}
-            </button>
-          </Modal.Body>
-        </Modal>
-        <Modal
-          show={utxos.length}
-          fullscreen={"md-down"}
-          onHide={() => setUtxos([])}
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>Claim Bitcoin Payment</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <p>
-              A payment was made to you in Bitcoin transaction{" "}
-              <a
-                target="_blank"
-                href={`https://mempool.space/tx/${utxos[0] && Buffer.from(utxos[0].transaction_id).toString("hex")}?mode=details`}
-              >
-                {utxos[0] &&
+              {utxos[0] &&
+                Buffer.from(utxos[0].transaction_id)
+                  .toString("hex")
+                  .substr(0, 6) +
+                  ".." +
                   Buffer.from(utxos[0].transaction_id)
                     .toString("hex")
-                    .substr(0, 6) +
-                    ".." +
-                    Buffer.from(utxos[0].transaction_id)
-                      .toString("hex")
-                      .substr(-6)}
-              </a>
-            </p>
-            <button
-              onClick={() => claimUtxo(utxos[0])}
-              className="btn btn-success btn-xlg w-100"
-            >
-              <title>
-                Accept {formatBtc(utxos[0] && utxos[0].value)} on the Stable
-                Network
-              </title>
-              Accept {formatBtc(utxos[0] && utxos[0].value)} BTC
-            </button>
-          </Modal.Body>
-        </Modal>
-        <SideNav />
-      </div>
-    
+                    .substr(-6)}
+            </a>
+          </p>
+          <button
+            onClick={() => claimUtxo(utxos[0])}
+            className="btn btn-success btn-xlg w-100"
+          >
+            <title>
+              Accept {formatBtc(utxos[0] && utxos[0].value)} on the Stable
+              Network
+            </title>
+            Accept {formatBtc(utxos[0] && utxos[0].value)} BTC
+          </button>
+        </Modal.Body>
+      </Modal>
+      <SideNav />
+    </div>
   );
 }
 

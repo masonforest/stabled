@@ -1,3 +1,7 @@
+use axum::http::uri::Uri;
+use axum::response::Redirect;
+use axum::routing::get;
+use axum::Router;
 use bitcoin::{key::Secp256k1, Address, Network, PrivateKey, PublicKey};
 use dotenv::dotenv;
 use rustls_acme::{caches::DirCache, AcmeConfig};
@@ -89,6 +93,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }
         });
+        tokio::spawn(async move {
+            let http_addr = (Ipv6Addr::UNSPECIFIED, 80);
+            let http_app = Router::new().route("/{*any}", get(http_handler));
+            axum_server::bind(http_addr.into())
+                .serve(http_app.into_make_service())
+                .await
+                .unwrap();
+        });
         axum_server::bind(addr.into())
             .acceptor(acceptor)
             .serve(app.into_make_service())
@@ -99,4 +111,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         axum::serve(listener, app).await?
     };
     Ok(())
+}
+
+async fn http_handler(uri: Uri) -> Redirect {
+    let mut parts = uri.into_parts();
+    parts.scheme = Some("https".parse().unwrap());
+    // let uri = format!("https://127.0.0.1:3443{}", uri.path());
+
+    Redirect::temporary(&Uri::from_parts(parts).unwrap().to_string())
 }

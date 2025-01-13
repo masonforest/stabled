@@ -36,33 +36,34 @@ pub struct Transfer {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
-pub struct CreateMagicLink {
+pub struct CreateCheck {
+    pub signer: crate::Address,
     pub currency: Currency,
     pub value: i64,
-    pub address: crate::Address
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
-pub struct RedeemMagicLink {
-    pub address: crate::Address,
-    pub recipient_address: crate::Address,
-    pub signature: [u8; 65]
+pub struct CashCheck {
+    pub transaction_id: i64,
+    pub signature: [u8; 65],
 }
-impl RedeemMagicLink {
+impl CashCheck {
     #[cfg(test)]
-    pub fn sign(magic_link_address: crate::Address, recipient_address: crate::Address, signing_key: &SigningKey) -> Self {
+    pub fn sign(
+        transaction_id: i64,
+        recipient_address: crate::Address,
+        signing_key: &SigningKey,
+    ) -> Self {
         let (signature, recovery_id) = signing_key
-            .sign_recoverable(&borsh::to_vec(&(magic_link_address, &recipient_address)).unwrap())
+            .sign_recoverable(&borsh::to_vec(&(transaction_id, &recipient_address)).unwrap())
             .unwrap();
         let signature_bytes: [u8; 65] = [signature.to_bytes().as_slice(), &[recovery_id.to_byte()]]
             .concat()
             .try_into()
             .unwrap();
         Self {
-            address: magic_link_address,
-            recipient_address,
+            transaction_id: transaction_id,
             signature: signature_bytes,
-
         }
     }
 }

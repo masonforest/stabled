@@ -9,6 +9,10 @@ import { stable } from "./App";
 import { addressToObject } from "./StableNetwork";
 
 function formatUsd(value) {
+  if (!value) {
+    return;
+  }
+
   let USD = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",

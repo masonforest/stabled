@@ -21,7 +21,10 @@ pub async fn poll(pool: PgPool) {
     let new_best_block_hash = rpc::get_best_block_hash().await;
 
     if current_best_block_hash != Some(new_best_block_hash) {
-        println!("Inserting Bitcoin Block {}", hex::encode(new_best_block_hash));
+        println!(
+            "Inserting Bitcoin Block {}",
+            hex::encode(new_best_block_hash)
+        );
         db::insert_bitcoin_block(
             &pool,
             rpc::get_block(new_best_block_hash).await,
