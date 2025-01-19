@@ -14,10 +14,9 @@ import { addressToObject, pubKeyToBytes } from "./StableNetwork";
 import { randomBytes } from "@noble/hashes/utils";
 
 function formatUsd(value) {
-  if (!value) {
+  if (typeof value == "undefined") {
     return;
   }
-
   let USD = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",

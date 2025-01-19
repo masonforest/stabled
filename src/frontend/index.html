@@ -62,19 +62,23 @@
       const checkTransactionId = parseInt(window.location.pathname.slice(1));
       const isMagicLink = Number.isInteger(checkTransactionId);
       const checkEntropy = window.location.hash.slice(1);
-      const amount = BigInt(
-        document.querySelector('meta[name="amount"]').content,
-      );
-
+      let amount;
+      if (document.querySelector('meta[name="amount"]')) {
+        amount = BigInt(document.querySelector('meta[name="amount"]').content);
+      }
     </script>
   </head>
   <body>
-      <div id="wallet_buttons">
+    <div id="wallet_buttons">
       <p>
-      <button id="create-wallet" onclick="window.createWallet(event)"></button>
+        <button
+          id="create-wallet"
+          onclick="window.createWallet(event)"
+        ></button>
 
-      <button onclick="alert('too bad')">I Already Have a Crypto Wallet</button>
-
+        <button onclick="alert('too bad')">
+          I Already Have a Crypto Wallet
+        </button>
       </p>
     </div>
     <div id="root"></div>
@@ -87,7 +91,7 @@
         createWalletText = `Create Wallet`;
       }
       document.getElementById("create-wallet").innerText = createWalletText;
-      
+
       if (window.location.pathname == "/") {
         if (!localStorage.entropy && window.location.hash.slice(1)) {
           localStorage.entropy = window.location.hash.slice(1);

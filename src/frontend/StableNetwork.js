@@ -143,10 +143,19 @@ export default class StableNetwork {
   }
 
   async get(path) {
-    return new Uint8Array(
-      await (
-        await fetch(path)
-      ).arrayBuffer(),
+    return new Uint8Array(await (await fetch(this.baseUrl + path)).arrayBuffer());
+  }
+
+  async claimUtxo(transactionId, currency, vout, privateKey) {
+    return this.postTransaction(
+      {
+        ClaimUtxo: {
+          transaction_id: transactionId,
+          currency,
+          vout,
+        },
+      },
+      privateKey,
     );
   }
 
@@ -208,7 +217,7 @@ export default class StableNetwork {
   async post(path, body) {
     return new Uint8Array(
       await (
-        await fetch(path, {
+        await fetch(this.baseUrl + path, {
           method: "POST",
           body,
         })
@@ -216,6 +225,9 @@ export default class StableNetwork {
     );
   }
 
+  get baseUrl() {
+    return import.meta.env.DEV ? "http://localhost" : `${window.location.protocol}//${window.location.hostname}`
+  }
   get protocol() {
     return this.development ? "http" : "https";
   }

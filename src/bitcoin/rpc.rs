@@ -46,8 +46,6 @@ pub async fn get_network() -> &'static Network {
 }
 
 pub async fn send_to_address(address: bitcoin::Address, value: i64) -> [u8; 32] {
-    println!("value: {}", value);
-    println!("json value: {:?}", json!(Decimal::new(value, 8)));
     let client = reqwest::Client::new();
     let resp = client
         .post(env::var("BITCOIND_URL").unwrap())

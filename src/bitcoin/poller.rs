@@ -25,6 +25,13 @@ pub async fn poll(pool: PgPool) {
             "Inserting Bitcoin Block {}",
             hex::encode(new_best_block_hash)
         );
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let start = SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+        println!("{:?}", since_the_epoch);
         db::insert_bitcoin_block(
             &pool,
             rpc::get_block(new_best_block_hash).await,

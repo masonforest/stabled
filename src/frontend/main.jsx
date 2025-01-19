@@ -37,22 +37,23 @@ window.cashCheck = async () => {
     base64urlnopad.decode(checkEntropy),
   ).derive("m/84'/0'/0");
   const stable = new StableNetwork({
-    development: import.meta.env.DEV
+    development: import.meta.env.DEV,
   });
 
   await stable.cashCheck(checkTransactionId, checkPrivateKey, privateKey);
-  document.getElementById("wallet_buttons").style.display = "none";
-  history.pushState({}, "", `/#${localStorage.entropy}`);
-  loadWallet()
-};
-if(isMagicLink) {
-    window.cashCheck();
-}
-console.log(window.location.pathname)
-if (localStorage.entropy && window.location.pathname == "/") {
   loadWallet();
-}
-if(!localStorage.entropy) {
+};
+(async function () {
+  if (isMagicLink) {
+    await window.cashCheck();
+  }
+  if (localStorage.entropy && window.location.pathname == "/") {
+    document.getElementById("wallet_buttons").style.display = "none";
+    history.pushState({}, "", `/#${localStorage.entropy}`);
+    loadWallet();
+  }
+})();
+if (!localStorage.entropy) {
   document.getElementById("wallet_buttons").style.display = "flex";
 }
 window.createWallet = async (event) => {
@@ -64,4 +65,5 @@ window.createWallet = async (event) => {
   if (isMagicLink) {
     window.cashCheck(event);
   }
+  loadWallet();
 };

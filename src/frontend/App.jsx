@@ -49,7 +49,7 @@ let USD = new Intl.NumberFormat("en-US", {
 });
 
 function formatUsd(value) {
-  if (!value) {
+  if (typeof value == "undefined") {
     return;
   }
   let USD = new Intl.NumberFormat("en-US", {
@@ -70,11 +70,10 @@ function formatBtc(value) {
 }
 
 export const stable = new StableNetwork({
-  development: import.meta.env.DEV
+  development: import.meta.env.DEV,
 });
 
 function App() {
-  const [magicEntropy, setMagicEntropy] = useState();
   const [checkBalance, setCheckBalance] = useState();
   const [magicLink, setMagicLink] = useState(null);
 
@@ -93,9 +92,7 @@ function App() {
       if (!publicKey) {
         return;
       }
-      // console.log(Buffer.from(pubKeyToBytes(publicKey)).toString("hex"))
       let usdBalance = await stable.getBalance(pubKeyToBytes(publicKey), "usd");
-      // console.log(usdBalance)
       setUsdBalance(usdBalance);
     },
     1000,
@@ -111,7 +108,6 @@ function App() {
     async function setCheckBalance2() {
       const magicTransactionId = parseInt(window.location.pathname.slice(1));
       const isMagicLink = Number.isInteger(magicTransactionId);
-      console.log(isMagicLink);
       if (!isMagicLink) {
         return;
       }
@@ -119,13 +115,11 @@ function App() {
       // console.log(checkEntropy)
       const { publicKey: checkPublicKey } =
         HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
-      alert("getting check balance");
       setCheckBalance(
         await stable.getBalance(pubKeyToBytes(checkPublicKey), "usd"),
       );
     }
 
-    console.log("calling");
     setCheckBalance2();
   }, []);
 
@@ -146,7 +140,6 @@ function App() {
     const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
     const { privateKey: checkPrivateKey } =
       HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
-    console.log(checkPrivateKey);
     const checkTransactionId = parseInt(window.location.pathname.slice(1));
     await stable.cashCheck(checkTransactionId, checkPrivateKey, privateKey);
     history.pushState({}, "", `/#${localStorage.entropy}`);
@@ -154,38 +147,29 @@ function App() {
   }
 
   async function claimUtxo(utxo) {
-    const transaction = {
-      nonce: 0,
-      transaction: {
-        ClaimUtxo: {
-          transaction_id: utxo.transaction_id,
-          currency: { Usd: {} },
-          vout: utxo.vout,
-        },
-      },
-    };
-    const serliaizedTransaction = borshSerialize(
-      transactionSchema,
-      transaction,
-    );
-    const signature = secp256k1.sign(sha256(serliaizedTransaction), privateKey);
-    let serialized = borshSerialize(signedTransactionSchema, {
-      transaction: transaction.transaction,
-      nonce: transaction.nonce,
-      signature: secp256k1.etc.concatBytes(
-        signature.toCompactRawBytes(),
-        new Uint8Array([signature.recovery]),
-      ),
-    });
-    stable.postRawTransaction(serialized);
+    stable.claimUtxo(utxo.transaction_id, { Usd: {} }, utxo.vout, privateKey);
+    // const serliaizedTransaction = borshSerialize(
+    //   transactionAndNonceSchema,
+    //   transaction,
+    // );
+    // const signature = secp256k1.sign(sha256(serliaizedTransaction), privateKey);
+    // let serialized = borshSerialize(signedTransactionSchema, {
+    //   transaction: transaction.transaction,
+    //   nonce: transaction.nonce,
+    //   signature: secp256k1.etc.concatBytes(
+    //     signature.toCompactRawBytes(),
+    //     new Uint8Array([signature.recovery]),
+    //   ),
+    // });
+    // stable.postRawTransaction(serialized);
   }
 
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
 
   const isLoading = useMemo(
-      () => [usdBalance].some((value) => typeof value === "undefined"),
-      [usdBalance],
-    );
+    () => [usdBalance].some((value) => typeof value === "undefined"),
+    [usdBalance],
+  );
   return isLoading ? (
     <Loading></Loading>
   ) : (

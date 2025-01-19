@@ -8,6 +8,7 @@ use crate::{
 };
 use bitcoin::{BlockHash, Network, TxOut};
 use log::info;
+use sqlx::PgConnection;
 use sqlx::{query, query_as, Executor, PgPool, Postgres, Row};
 use std::{collections::HashMap, net::IpAddr, str::FromStr};
 
@@ -76,7 +77,7 @@ pub async fn run_transaction(pool: PgPool, transaction: SignedTransaction) -> Re
         }
         Transaction::ClaimUtxo(ref claim_utxo_transaction) => {
             claim_utxo(
-                &pool.clone(),
+                &mut *tx,
                 transaction_id,
                 transaction.from_address(),
                 claim_utxo_transaction.transaction_id,
@@ -85,65 +86,32 @@ pub async fn run_transaction(pool: PgPool, transaction: SignedTransaction) -> Re
             )
             .await?
         }
+
         Transaction::CreateCheck(transaction::CreateCheck {
             signer,
             currency,
             value,
-        }) => {
-            // query(
-            //     "INSERT into accounts (is_check, address)
-            //     VALUES (TRUE, $1) RETURNING id",
-            // )
-            // .bind(address)
-            // .execute(&mut *tx).await?;
-            insert_transfer(
-                &mut *tx,
-                transaction_id,
-                transaction.from_address(),
-                signer,
-                &currency,
-                value,
-            )
-            .await
-            .map_err(crate::Error::from)?
-            // let check_id = insert_check(&mut *tx, transaction_id, transaction.from_address(), address, &currency, value).await?;
-            // return Ok(Some(check_id))
-        }
+        }) => insert_transfer(
+            &mut *tx,
+            transaction_id,
+            transaction.from_address(),
+            signer,
+            &currency,
+            value,
+        )
+        .await
+        .map_err(crate::Error::from)?,
         Transaction::CashCheck(transaction::CashCheck {
             transaction_id: check_transaction_id,
             ..
         }) => {
-            // let is_check: bool = query("SELECT accounts.is_check FROM ledger
-            //     JOIN accounts ON accounts.id = ledger.recipient_id
-            //     WHERE accounts.address = $1")
-            //     .bind(signer)
-            //     .fetch_one(&mut *tx)
-            //     .await?.get("is_check");
-
-            //     if !is_check {
-            //     return Err(crate::Error::Error(
-            //         "This account is not a magic link account".to_string(),
-            //     ));
-            //     };
-            let row = query(
-                "SELECT account_address(recipient_id) AS recipient, ledger.* FROM ledger
-        JOIN accounts ON accounts.id = ledger.recipient_id
-        WHERE ledger.transaction_id = $1",
-            )
-            .bind(check_transaction_id)
-            .fetch_one(&mut *tx)
-            .await?;
-
-            insert_transfer(
+            cash_check(
                 &mut *tx,
-                transaction_id,
-                row.get("recipient"),
                 transaction.from_address(),
-                &row.get("currency"),
-                row.get("value"),
+                transaction_id,
+                check_transaction_id,
             )
-            .await
-            .map_err(crate::Error::from)?
+            .await?
         }
     };
     tx.commit().await.map_err(Error::from)?;
@@ -214,54 +182,6 @@ where
     .map_err(crate::Error::from)
 }
 
-// pub async fn insert_check<'a, E>(
-//     pool: E,
-//     transaction_id: i64,
-//     payor: Address,
-//     address: Address,
-//     currency: &Currency,
-//     value: i64,
-// ) -> Result<i64>
-// where
-//     E: Executor<'a, Database = Postgres>,
-// {
-// }
-
-// pub async fn redeem_check<'a, E>(
-//     pool: E,
-//     transaction_id: i64,
-//     address: Address,
-//     recipient: Address,
-// ) -> Result<i64>
-// where
-//     E: Executor<'a, Database = Postgres> + Clone,
-// {
-// }
-
-pub async fn insert_signature<'a, E>(
-    pool: E,
-    transaction_id: i64,
-    account: Address,
-    nonce: i64,
-    signature: [u8; 65],
-) -> Result<()>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    query(
-        "INSERT into signatures (transaction_id, account_id, nonce, signature)
-        VALUES ($1, account_id($2), $3, $4)",
-    )
-    .bind(transaction_id)
-    .bind(account)
-    .bind(nonce)
-    .bind(signature)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
 #[derive(sqlx::FromRow, sqlx::Type)]
 pub struct Utxo {
     pub transaction_id: Vec<u8>,
@@ -277,44 +197,66 @@ pub struct LedgerEntry {
     pub value: i64,
 }
 
-pub async fn claim_utxo<'a, E>(
-    pool: E,
+pub async fn cash_check(
+    conn: &mut PgConnection,
+    recipient: Address,
+    transaction_id: i64,
+    check_transaction_id: i64,
+) -> Result<i64> {
+    let check = query(
+        "SELECT account_address(recipient_id) AS recipient, ledger.* FROM ledger
+        JOIN accounts ON accounts.id = ledger.recipient_id
+        WHERE ledger.transaction_id = $1",
+    )
+    .bind(check_transaction_id)
+    .fetch_one(&mut *conn)
+    .await?;
+
+    insert_transfer(
+        &mut *conn,
+        transaction_id,
+        check.get("recipient"),
+        recipient,
+        &check.get("currency"),
+        check.get("value"),
+    )
+    .await
+    .map_err(crate::Error::from)
+}
+
+pub async fn claim_utxo(
+    conn: &mut PgConnection,
     transaction_id: i64,
     address: Address,
     bitcoin_transaction_id: [u8; 32],
     vout: i32,
     currency: &Currency,
-) -> Result<i64>
-where
-    E: Executor<'a, Database = Postgres> + Clone,
-{
-    // println!("{} {} {} {:?}", hex::encode(address.0), hex::encode(transaction_id), vout, currency);
+) -> Result<i64> {
     let maybe_utxo: Option<Utxo> = sqlx::query_as!(
-        Utxo,
-        "UPDATE utxos SET redeemed = true
-        WHERE
-        account_id = account_id($1) AND transaction_id = $2 AND vout = $3 AND redeemed = false
-        RETURNING transaction_id, vout, value",
-        &address.0,
-        &bitcoin_transaction_id,
-        vout
-    )
-    .fetch_optional(pool.clone())
-    .await?;
-
+                Utxo,
+                "UPDATE utxos SET redeemed = true
+                WHERE
+                account_id = account_id($1) AND transaction_id = $2 AND vout = $3 AND redeemed = false
+                RETURNING transaction_id, vout, value",
+                &address.0,
+                &bitcoin_transaction_id,
+                vout
+            )
+            .fetch_optional(&mut *conn)
+            .await?;
     if let Some(utxo) = maybe_utxo {
         return Ok(query(
-            "INSERT into ledger (transaction_id, payor_id, recipient_id, currency, value)
-            VALUES ($1, system_address(), account_id($2), $3, satoshis_to_currency($3, $4))
-            RETURNING id",
-        )
-        .bind(transaction_id)
-        .bind(address)
-        .bind(&currency)
-        .bind(utxo.value)
-        .fetch_one(pool)
-        .await
-        .map(|row| row.get("id"))?);
+                            "INSERT into ledger (transaction_id, payor_id, recipient_id, currency, value)
+                            VALUES ($1, system_address(), account_id($2), $3, satoshis_to_currency($3, $4))
+                            RETURNING id",
+                        )
+                        .bind(transaction_id)
+                        .bind(address)
+                        .bind(&currency)
+                        .bind(utxo.value)
+                        .fetch_one(&mut *conn)
+                        .await
+                        .map(|row| row.get("id"))?);
     } else {
         return Err(crate::Error::Error(
             "Utxo doesn't exisit for this address or has already been redeemed".to_string(),

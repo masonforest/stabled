@@ -409,29 +409,11 @@ mod tests {
             .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
             .unwrap();
 
-        // let response = app(pool.clone()).await.oneshot(request).await.unwrap();
-        // let body = response.into_body().collect().await.unwrap().to_bytes();
-        // println!("{:?}", body);
-
-        // assert_eq!(response.status(), StatusCode::OK);
-
-        // // let request = Request::builder()
-        // //     .method("GET")
-        // //     .uri(format!("/checks/{}", hex::encode((*ALICE).0)))
-        // //     .body(Body::empty())
-        // //     .unwrap();
-
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
         let body = response.into_body().collect().await.unwrap().to_bytes();
 
         let transaction_id = from_slice::<i64>(&body).unwrap();
 
-        // assert_eq!(response.status(), StatusCode::OK);
-
-        // let body = response.into_body().collect().await.unwrap().to_bytes();
-        // println!("{:?}", body);
-
-        // let signature = CashCheck::sign(check_id, *BOB, &CHECK_SECRET_KEY);
         let transaction =
             Transaction::CashCheck(CashCheck::sign(transaction_id, *BOB, &CHECK_SECRET_KEY));
 
@@ -443,7 +425,6 @@ mod tests {
             .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
             .unwrap();
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
-        // let body = response.into_body().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), StatusCode::OK);
 
@@ -513,7 +494,6 @@ mod tests {
 
         let response = app(pool.clone()).await.oneshot(request).await.unwrap();
 
-        // let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(response.status(), StatusCode::OK);
         bitcoin_rpc_mock.assert();
 
@@ -531,49 +511,38 @@ mod tests {
 
         assert_eq!(from_slice::<i64>(&body).unwrap(), 0);
     }
-    // #[sqlx::test]
-    // async fn claim_utxo2(pool: PgPool) {
-    //     let transaction = Transaction::ClaimUtxo(transaction::ClaimUtxo {
-    //         transaction_id: [0; 32],
-    //         vout: 0,
-    //         Currency::Usd,
-    //     });
-    //     let signed_transaction = transaction.sign(0, &ALICES_SECRET_KEY.clone());
-    //     let request = Request::builder()
-    //         .method("POST")
-    //         .header("content-type", "application/octet-stream")
-    //         .uri("/transactions")
-    //         .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
-    //         .unwrap();
-    // }
+    #[sqlx::test]
+    async fn claim_utxo2(pool: PgPool) {
+        let block = bitcoin_block!("deposit-block-877380.block");
+        db::insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
+            .await
+            .unwrap();
+        let transaction = Transaction::ClaimUtxo(transaction::ClaimUtxo {
+            transaction_id: TEST_UTXO.0,
+            vout: TEST_UTXO.1,
+            currency: Currency::Usd,
+        });
+        let signed_transaction = transaction.sign(0, &BURNS_SECRET_KEY.clone());
+        let request = Request::builder()
+            .method("POST")
+            .header("content-type", "application/octet-stream")
+            .uri("/transactions")
+            .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
+            .unwrap();
+        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/balances/usd/{}", hex::encode((*BURNS).0)))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+
+        assert_eq!(from_slice::<i64>(&body).unwrap(), 100);
+    }
 }
-// #[cfg(test)]
-// macro_rules! bitcoin_block {
-//     ($file_name:expr) => {{
-//         let mut file = File::open(concat!(
-//             env!("CARGO_MANIFEST_DIR"),
-//             "/src/test_data/",
-//             $file_name
-//         ))
-//         .unwrap();
-//         let mut data = Vec::new();
-//         file.read_to_end(&mut data).unwrap();
-
-//         ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
-//     }};
-// }
-
-// #[sqlx::test]
-// async fn test_claim_utxo(pool: PgPool) {
-//     db::credit(&pool, *NODE_ADDRESS, Currency::Usd, i32::MAX as i64)
-//         .await
-//         .unwrap();
-//     let block = bitcoin_block!("deposit-block-877380.block");
-//     insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
-//         .await
-//         .unwrap();
-//     claim_utxo(&pool, 0, *BURNS, TEST_UTXO.0, TEST_UTXO.1, &Currency::Usd)
-//         .await
-//         .unwrap();
-//     assert_eq!(get_balance(&pool, *BURNS, Currency::Usd).await.unwrap(), 100)
-// }
