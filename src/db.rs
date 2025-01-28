@@ -1,12 +1,12 @@
 use crate::{
-    address::{script_buf_to_address, Address},
+    address::Address,
     bitcoin::multi_sig,
     constants::{PUBLIC_IP, PUBLIC_KEY, SYSTEM_ADDRESS},
     error::{Error, Result},
     transaction::{self, Currency},
     SignedTransaction, Transaction,
 };
-use bitcoin::{BlockHash, Network, TxOut};
+use bitcoin::{BlockHash, Network};
 use log::info;
 use sqlx::PgConnection;
 use sqlx::{query, query_as, Executor, PgPool, Postgres, Row};
@@ -293,6 +293,7 @@ pub async fn insert_bitcoin_block<'a, E>(
     pool: E,
     block: ::bitcoin::Block,
     exchange_rates: HashMap<Currency, f64>,
+    deposit_utxos: Vec<(Utxo, Address)>,
 ) -> Result<()>
 where
     E: Executor<'a, Database = Postgres> + Clone,
@@ -321,33 +322,14 @@ where
     for (currency, exchange_rate) in exchange_rates {
         insert_exchange_rate(pool.clone(), currency, exchange_rate).await?;
     }
-    let deposit_utxos: Vec<((bitcoin::Txid, usize), TxOut)> = block
-        .txdata
-        .into_iter()
-        .flat_map(|t| {
-            t.output
-                .clone()
-                .into_iter()
-                .enumerate()
-                .map(move |(i, o)| ((t.compute_txid(), i), o.clone()))
-        })
-        .filter(|(_, output)| output.script_pubkey.is_p2wpkh())
-        .filter(|(_, output)| crate::bitcoin::is_stable_address(&output.script_pubkey))
-        .collect();
 
-    for ((txid, vout), deposit_utxo) in deposit_utxos {
+    for (deposit_utxo, address) in deposit_utxos {
         insert_utxo(
             pool.clone(),
-            script_buf_to_address(&deposit_utxo.script_pubkey),
-            (*<bitcoin::Txid as AsRef<[u8; 32]>>::as_ref(&txid)
-                .iter()
-                .copied()
-                .rev()
-                .collect::<Vec<_>>())
-            .try_into()
-            .unwrap(),
-            vout as i32,
-            deposit_utxo.value.to_sat() as i64,
+            address,
+            (deposit_utxo.transaction_id).try_into().unwrap(),
+            deposit_utxo.vout as i32,
+            deposit_utxo.value,
         )
         .await?;
     }
@@ -481,7 +463,7 @@ where
         .get("value"))
 }
 
-pub async fn get_balance<'a, E>(pool: E, address: Address, currency: Currency) -> Result<i64>
+pub async fn get_balance<'a, E>(pool: E, address: &Address, currency: &Currency) -> Result<i64>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -494,7 +476,7 @@ where
             .get("value")
     )
 }
-pub async fn get_utxos<'a, E>(pool: E, address: Address) -> Result<Vec<Utxo>>
+pub async fn get_utxos<'a, E>(pool: E, address: &Address) -> Result<Vec<Utxo>>
 where
     E: Executor<'a, Database = Postgres>,
 {

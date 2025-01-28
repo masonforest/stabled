@@ -28,8 +28,7 @@ function Send({ address, usdBalance, privateKey }) {
   const send = useCallback((event) => {
     event.preventDefault();
     (async () => {
-      //   console.log(addressToObject(recipientAddress));
-      let newTransactionId = await stable.postTransaction(
+      await stable.postTransaction(
         {
           Transfer: {
             currency: { Usd: {} },
@@ -40,9 +39,6 @@ function Send({ address, usdBalance, privateKey }) {
         privateKey,
       );
 
-      if (!recipientAddress.startsWith("bc1qfast")) {
-        setTransactionId(newTransactionId);
-      }
       setRecipientAddress("");
       setValue("");
     })();

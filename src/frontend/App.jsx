@@ -87,17 +87,29 @@ function App() {
       ),
     [],
   );
-  useInterval(
-    async () => {
-      if (!publicKey) {
-        return;
-      }
-      let usdBalance = await stable.getBalance(pubKeyToBytes(publicKey), "usd");
-      setUsdBalance(usdBalance);
-    },
-    1000,
-    [publicKey],
-  );
+
+  useEffect(() => {
+    if (!publicKey) {
+      return;
+    }
+    const es = new EventSource(`http://localhost/sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`, {
+      withCredentials: true,
+    });
+    es.onmessage = ({data}) => {
+      // console.log(JSON.parse(data)j)
+      const {balance, utxos: newUtxos} = JSON.parse(data)
+      setUsdBalance(BigInt(balance))
+      setUtxos(
+        newUtxos.map(utxo => ({
+          ...utxo,
+          transaction_id: Buffer.from(utxo.transaction_id, "hex"),
+          value: BigInt(utxo.value)
+        }))
+      )
+    }
+    es.onerror = (e, x) => console.log(e)
+    return () => es.close();
+  }, [publicKey]);
 
   const address = useMemo(
     () => publicKey && pubKeyToAddress(publicKey),
@@ -123,19 +135,6 @@ function App() {
     setCheckBalance2();
   }, []);
 
-  useInterval(
-    async () => {
-      if (!publicKey) {
-        return;
-      }
-      // console.log(Buffer.from(pubKeyToBytes(publicKey)).toString("hex"));
-
-      let utxos = await stable.getUtxos(pubKeyToBytes(publicKey), "usd");
-      setUtxos(utxos);
-    },
-    1000,
-    [publicKey],
-  );
   async function cashCheck() {
     const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
     const { privateKey: checkPrivateKey } =
@@ -148,20 +147,6 @@ function App() {
 
   async function claimUtxo(utxo) {
     stable.claimUtxo(utxo.transaction_id, { Usd: {} }, utxo.vout, privateKey);
-    // const serliaizedTransaction = borshSerialize(
-    //   transactionAndNonceSchema,
-    //   transaction,
-    // );
-    // const signature = secp256k1.sign(sha256(serliaizedTransaction), privateKey);
-    // let serialized = borshSerialize(signedTransactionSchema, {
-    //   transaction: transaction.transaction,
-    //   nonce: transaction.nonce,
-    //   signature: secp256k1.etc.concatBytes(
-    //     signature.toCompactRawBytes(),
-    //     new Uint8Array([signature.recovery]),
-    //   ),
-    // });
-    // stable.postRawTransaction(serialized);
   }
 
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);

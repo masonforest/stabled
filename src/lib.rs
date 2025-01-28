@@ -6,19 +6,19 @@ mod error;
 pub mod exchange_rates;
 pub mod transaction;
 
+pub use crate::address::Address;
+use crate::transaction::{CashCheck, CreateCheck};
 use crate::{
-    address::Address,
     error::Error,
     transaction::{ClaimUtxo, Currency, Transfer},
 };
-
-use crate::transaction::{CashCheck, CreateCheck};
 use askama::Template;
+use axum::extract::Query;
 use axum::{
     body::Bytes,
     extract::State,
     http::{header, method::Method, HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{sse::Event, Html, IntoResponse, Response, Sse},
     routing::{get, post},
     Router,
 };
@@ -27,12 +27,22 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use k256::ecdsa::SigningKey;
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use rust_decimal::Decimal;
+use serde::Deserialize;
+use serde_json::json;
 use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Duration;
 use std::{path::Path, process::Command, str::FromStr};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt as _;
+use tower_http::cors::AllowOrigin;
+use tower_http::{cors::CorsLayer, services::ServeDir};
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -43,20 +53,27 @@ struct IndexTemplate {
 
 pub async fn app(pool: PgPool) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::exact("http://localhost:5173".parse().unwrap()))
         .allow_headers(vec![header::CONTENT_TYPE])
-        .allow_methods(vec![Method::POST]);
+        .allow_methods(vec![Method::POST, Method::GET])
+        .allow_credentials(true);
 
     Router::new()
         .route("/transactions", post(insert_transaction))
         .route("/balances/{currency}/{address}", get(get_balance))
         .route("/utxos/{address}", get(get_utxos))
+        .route("/sse", get(get_sse))
         .route("/{transaction_id}", get(get_magic))
         .route("/images/{amount}", get(get_magic_image))
         .route("/", get(get_index))
         .nest_service("/assets", ServeDir::new("templates/assets"))
         .layer(cors)
-        .with_state(pool)
+        .with_state(AppState {
+            pool: Arc::new(Mutex::new(pool)),
+            update_channel: Arc::new(Mutex::new(tokio::sync::broadcast::channel::<Address>(
+                1000000,
+            ))),
+        })
 }
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct Account {
@@ -112,6 +129,13 @@ pub struct SignedTransaction {
     pub signature: [u8; 65],
 }
 
+// type AppState = PgPool;
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: Arc<Mutex<PgPool>>,
+    pub update_channel: Arc<Mutex<(Sender<Address>, Receiver<Address>)>>,
+}
+
 impl SignedTransaction {
     pub fn from_address(&self) -> Address {
         let s: [u8; 64] = self.signature[0..64].try_into().unwrap();
@@ -129,25 +153,59 @@ impl SignedTransaction {
 }
 
 pub async fn insert_transaction(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     body: Bytes,
 ) -> axum::response::Result<impl IntoResponse> {
     let transaction: SignedTransaction = borsh::from_slice(&body.to_vec()).map_err(Error::from)?;
-    let transaction_id = db::run_transaction(pool.clone(), transaction.clone())
+    let transaction_id = db::run_transaction(state.pool.lock().await.clone(), transaction.clone())
         .await
         .map_err(Error::from)?;
+    match transaction.transaction {
+        Transaction::Transfer(transaction::Transfer {
+            to: transaction::Address::Stable(to),
+            ..
+        }) => {
+            state
+                .update_channel
+                .lock()
+                .await
+                .0
+                .send(transaction.from_address())
+                .unwrap();
+            state.update_channel.lock().await.0.send(to).unwrap();
+        }
+        Transaction::CreateCheck(transaction::CreateCheck { .. }) => {
+            state
+                .update_channel
+                .lock()
+                .await
+                .0
+                .send(transaction.from_address())
+                .unwrap();
+        }
+        Transaction::ClaimUtxo(_) => {
+            state
+                .update_channel
+                .lock()
+                .await
+                .0
+                .send(transaction.from_address())
+                .unwrap();
+        }
+        _ => (),
+    }
     Ok(borsh::to_vec(&transaction_id).map_err(Error::from)?)
 }
 
 async fn get_balance(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     axum::extract::Path((currency, address)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Result<impl IntoResponse> {
     Ok(borsh::to_vec(
         &db::get_balance(
-            &pool,
-            Address(hex::decode(&address).map_err(Error::from)?.try_into()?),
-            Currency::from_str(&currency)?,
+            &state.pool.lock().await.clone(),
+            &Address(hex::decode(&address).map_err(Error::from)?.try_into()?),
+            &Currency::from_str(&currency)?,
         )
         .await?,
     )
@@ -178,6 +236,81 @@ async fn get_index() -> axum::response::Result<impl IntoResponse> {
         amount: None,
     };
     Ok(HtmlTemplate(template))
+}
+
+#[derive(Deserialize)]
+struct SseParams {
+    currency: Currency,
+    address: String,
+}
+
+#[axum::debug_handler]
+async fn get_sse(
+    State(state): State<AppState>,
+    sse_params: Query<SseParams>,
+) -> axum::response::Result<impl IntoResponse> {
+    let (tx, rx) = mpsc::unbounded_channel::<Event>();
+    let address = Address(
+        hex::decode(&sse_params.address)
+            .map_err(Error::from)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    );
+    let currency = sse_params.currency.clone();
+    let receiver = state.update_channel.lock().await.0.subscribe();
+    let mut event_stream = BroadcastStream::new(receiver);
+
+    tokio::spawn(async move {
+        loop {
+            if address == event_stream.next().await.unwrap().unwrap() {
+                if send_state(&state.pool.lock().await.clone(), &tx, &address, &currency)
+                    .await
+                    .is_err()
+                {
+                    break;
+                };
+            }
+        }
+    });
+    state.update_channel.lock().await.0.send(address).unwrap();
+
+    Ok(
+        Sse::new(UnboundedReceiverStream::new(rx).map(Ok::<Event, Error>)).keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(1))
+                .text("keep alive text"),
+        ),
+    )
+}
+async fn send_state(
+    pool: &PgPool,
+    tx: &UnboundedSender<Event>,
+    address: &Address,
+    currency: &Currency,
+) -> Result<(), tokio::sync::mpsc::error::SendError<Event>> {
+    let utxos = &db::get_utxos(pool, address)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|utxo| {
+            json!({
+                "transaction_id": hex::encode(utxo.transaction_id),
+                "vout": utxo.vout,
+                "value": utxo.value.to_string(),
+            })
+        })
+        .collect::<Vec<serde_json::Value>>();
+    let balance = db::get_balance(pool, &address, &currency).await.unwrap();
+    tx.send(
+        Event::default()
+            .json_data(json!({
+                    "balance": balance.to_string(),
+                    "utxos": utxos
+
+            }))
+            .unwrap(),
+    )
 }
 
 async fn get_magic_image(
@@ -219,10 +352,11 @@ async fn get_magic_image(
 }
 
 async fn get_magic(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     axum::extract::Path(transaction_id): axum::extract::Path<i64>,
 ) -> axum::response::Result<impl IntoResponse> {
-    let ledger_entry = db::get_ledger_entry(&pool, transaction_id).await?;
+    let ledger_entry =
+        db::get_ledger_entry(&state.pool.lock().await.clone(), transaction_id).await?;
     let template = IndexTemplate {
         title: format!(
             "${} on the Stable Network",
@@ -234,13 +368,13 @@ async fn get_magic(
 }
 
 async fn get_utxos(
-    State(pool): State<PgPool>,
+    State(state): State<AppState>,
     axum::extract::Path(address): axum::extract::Path<String>,
 ) -> axum::response::Result<impl IntoResponse> {
     Ok(borsh::to_vec(
         &db::get_utxos(
-            &pool,
-            Address(
+            &state.pool.lock().await.clone(),
+            &Address(
                 hex::decode(&address)
                     .map_err(Error::from)?
                     .try_into()
@@ -476,6 +610,14 @@ mod tests {
             &pool,
             bitcoin_block!("deposit-block-877380.block"),
             HashMap::from([(Currency::Usd, 100000f64)]),
+            vec![(
+                db::Utxo {
+                    transaction_id: TEST_UTXO.0.to_vec(),
+                    vout: TEST_UTXO.1,
+                    value: 1,
+                },
+                *BURNS,
+            )],
         )
         .await
         .unwrap();
@@ -514,9 +656,21 @@ mod tests {
     #[sqlx::test]
     async fn claim_utxo2(pool: PgPool) {
         let block = bitcoin_block!("deposit-block-877380.block");
-        db::insert_bitcoin_block(&pool, block, HashMap::from([(Currency::Usd, 100000f64)]))
-            .await
-            .unwrap();
+        db::insert_bitcoin_block(
+            &pool,
+            block,
+            HashMap::from([(Currency::Usd, 100000f64)]),
+            vec![(
+                db::Utxo {
+                    transaction_id: TEST_UTXO.0.to_vec(),
+                    vout: TEST_UTXO.1,
+                    value: 1000,
+                },
+                *BURNS,
+            )],
+        )
+        .await
+        .unwrap();
         let transaction = Transaction::ClaimUtxo(transaction::ClaimUtxo {
             transaction_id: TEST_UTXO.0,
             vout: TEST_UTXO.1,
@@ -529,8 +683,7 @@ mod tests {
             .uri("/transactions")
             .body(Body::from(borsh::to_vec(&signed_transaction).unwrap()))
             .unwrap();
-        let response = app(pool.clone()).await.oneshot(request).await.unwrap();
-        let body = response.into_body().collect().await.unwrap().to_bytes();
+        app(pool.clone()).await.oneshot(request).await.unwrap();
         let request = Request::builder()
             .method("GET")
             .uri(format!("/balances/usd/{}", hex::encode((*BURNS).0)))

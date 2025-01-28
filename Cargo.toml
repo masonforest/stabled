@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 askama = "0.12.1"
-axum = "0.8.0"
+async-stream = "0.3.6"
+axum = { version = "0.8.1", features = ["ws", "macros"] }
+axum-extra = "0.10.0"
 axum-server = "0.7.1"
 bech32 = "0.11.0"
 bitcoin = "0.32.2"
@@ -16,6 +18,8 @@ borsh = { version = "*", features=["derive"] }
 borsh-derive = { version = "1.0.0-alpha.6" }
 dotenv = "0.15.0"
 env_logger = "0.11.5"
+futures = "0.3.31"
+headers = "0.4.0"
 hex = "0.4.3"
 k256 = { version = "0.13.3", features =["ecdsa-core"] }
 lazy_static = "1.5.0"
@@ -24,12 +28,13 @@ reqwest = { version ="0.12.7", features = ["json"]}
 rust_decimal = "1.36.0"
 rustls-acme = {version = "*", features=["axum"]}
 secp256k1 = { version = "0.29.1", features = ["rand"]}
+serde = "1.0.217"
 serde_json = "1.0.128"
 sha2 = "=0.11.0-pre.4"
 sqlx = {version = "0.8.2", features = ["postgres", "sqlite", "runtime-tokio", "macros", "migrate", "time", "tls-rustls", "ipnetwork"] }
 thiserror = "1.0.63"
 tokio = { version = "1.40.0", features = ["full"] }
-tokio-stream = "0.1.16"
+tokio-stream = { version = "0.1.16", features = ["sync"] }
 tower = "0.5.1"
 tower-http = {version = "0.5.2", features = ["cors", "fs"]}
 

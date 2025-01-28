@@ -1,11 +1,21 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::Deserialize;
 use std::str::FromStr;
 
 #[cfg(test)]
 use k256::ecdsa::SigningKey;
 
 #[derive(
-    Hash, BorshSerialize, BorshDeserialize, PartialEq, Clone, Debug, PartialOrd, sqlx::Type, Eq,
+    Hash,
+    BorshSerialize,
+    BorshDeserialize,
+    PartialEq,
+    Clone,
+    Debug,
+    PartialOrd,
+    sqlx::Type,
+    Eq,
+    Deserialize,
 )]
 #[sqlx(type_name = "currency", rename_all = "lowercase")]
 pub enum Currency {

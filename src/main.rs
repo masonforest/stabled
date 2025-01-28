@@ -7,8 +7,11 @@ use dotenv::dotenv;
 use rustls_acme::{caches::DirCache, AcmeConfig};
 use sqlx::postgres::PgPoolOptions;
 use stable::constants::{Env, ENV, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT};
+use stable::AppState;
+use std::sync::Arc;
 use std::{env, net::Ipv6Addr, path::PathBuf};
 use tokio::spawn;
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 
 #[tokio::main]
@@ -24,57 +27,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new().connect(&database_url).await?;
     let app = stable::app(pool.clone()).await;
-    stable::db::initialize(&pool).await?;
-    // stable::db::insert_bitcoin_block(
-    //     &pool,
-    //     {
-    //         let mut file = File::open("src/test_data/deposit-block-877380.block").unwrap();
-    //         let mut data = Vec::new();
-    //         file.read_to_end(&mut data).unwrap();
-
-    //         ::bitcoin::Block::consensus_decode(&mut &data[..]).unwrap()
-    //     },
-    //     HashMap::from([(currency::Usd, (96628.51 * 1000.0) as u64)]),
-    // )
-    // .await
-    // .unwrap();
-    // let block_hash = hex::decode("00000000000000000000a54a5c49d330ccbd050e511c13d62b26dd52f7881067").unwrap().try_into().unwrap();
-    // let block = stable::bitcoin::rpc::get_block(block_hash, db::get_hot_wallets(&pool).await?).await;
-    // let deposits = rpc::decode_deposits(
-    //     vec![
-    //         &json!({"hex": "0200000000010106e8325fa37c8d81ffadea6aead7447f7585b52cf758393ec09cb95dbeaffa950000000000ffffffff01e803000000000000220020ffad8cbc224eaa82f113328ad817b13a4a85ad958c25dd69c73fd99baa3ec8170247304402203bca7874f2b948a9038d2dabbad467369e0de1244fb9e7e9a426f9313590492c0220030dde6d764b9f9621b002211ef7f86da0331bae580912393dbb60f6e8b2e5c801210251eaa172d52c30f9c389009dd907a13f64057908fe3c4b71106d1e59627c0b3100000000"}),
-    //     ],
-    //     &db::get_hot_wallets(&pool).await?,
-    // );
-    // let block = stable::bitcoin::Block {
-    //     deposits,
-    //     ..Default::default()
-    // };
-    // stable::db::insert_bitcoin_block(
-    //     &pool,
-    //     block,
-    //     stable::exchange_rates::bitcoin().await.unwrap(),
-    // )
-    //     .await
-    //     .unwrap();
+    let app_state = AppState {
+        pool: Arc::new(Mutex::new(pool.clone())),
+        update_channel: Arc::new(Mutex::new(
+            tokio::sync::broadcast::channel::<stable::Address>(1000000),
+        )),
+    };
+    stable::db::initialize(&pool.clone()).await?;
     spawn({
-        let pool = pool.clone();
         async move {
-            stable::bitcoin::poller::run(pool).await;
+            stable::bitcoin::poller::run(app_state.clone()).await;
         }
     });
-    // println!("{}", Decimal::new(1000, 8));
-    // println!(
-    //     "{:?}",
-    //     stable::bitcoin::rpc::send_to_address(
-    //         bitcoin::Address::from_str("36sTjLr6VTRfF5MQGTH3BVVeDH17aEwQQW")
-    //             .unwrap()
-    //             .require_network(Network::Bitcoin)
-    //             .unwrap(),
-    //         1000
-    //     )
-    //     .await
-    // );
     println!("PORT: {}", PORT.to_string());
     let addr = (Ipv6Addr::UNSPECIFIED, *PORT);
     if matches!(*ENV, Env::Production) {
@@ -116,7 +80,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 async fn http_handler(uri: Uri) -> Redirect {
     let mut parts = uri.into_parts();
     parts.scheme = Some("https".parse().unwrap());
-    // let uri = format!("https://127.0.0.1:3443{}", uri.path());
 
     Redirect::temporary(&Uri::from_parts(parts).unwrap().to_string())
 }
