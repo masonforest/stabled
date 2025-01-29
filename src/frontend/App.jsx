@@ -92,7 +92,7 @@ function App() {
     if (!publicKey) {
       return;
     }
-    const es = new EventSource(`http://localhost/sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`, {
+    const es = new EventSource(`sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`, {
       withCredentials: true,
     });
     es.onmessage = ({data}) => {
