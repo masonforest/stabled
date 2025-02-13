@@ -1,17 +1,10 @@
-import React, {
-  useMemo,
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-} from "react";
-import { stable } from "./App";
-import * as secp256k1 from "@noble/secp256k1";
-import CopyToClipboardButton from "./CopyToClipBoardButton";
-import { HDKey } from "@scure/bip32";
-import { base64urlnopad } from "@scure/base";
-import { addressToObject, pubKeyToBytes } from "./StableNetwork";
 import { randomBytes } from "@noble/hashes/utils";
+import { base64urlnopad } from "@scure/base";
+import { HDKey } from "@scure/bip32";
+import { useState } from "react";
+import { stable } from "./App";
+import CopyToClipboardButton from "./CopyToClipBoardButton";
+import { pubKeyToBytes } from "./StableNetwork";
 
 function formatUsd(value) {
   if (typeof value == "undefined") {

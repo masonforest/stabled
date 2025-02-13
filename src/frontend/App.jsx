@@ -1,42 +1,24 @@
-import React, {
-  useMemo,
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-} from "react";
-import * as borsh from "borsh";
-import { BorshSchema, borshSerialize, borshDeserialize, Unit } from "borsher";
-import Deposit from "./Deposit";
-import Send from "./Send";
-import Withdraw from "./Withdraw";
-import Loading from "./Loading";
-import SideNav from "./SideNav";
-import MagicLink from "./MagicLink";
-import * as secp256k1 from "@noble/secp256k1";
-import { useInterval } from "react-use";
-import { QRCodeSVG } from "qrcode.react";
+import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
+import * as secp256k1 from "@noble/secp256k1";
+import { base64urlnopad } from "@scure/base";
+import { HDKey } from "@scure/bip32";
+import { QRCodeSVG } from "qrcode.react";
+import { useEffect, useMemo, useState } from "react";
+import Modal from "react-bootstrap/Modal";
+import Nav from "react-bootstrap/Nav";
+import Tab from "react-bootstrap/Tab";
+import Deposit from "./Deposit";
+import Loading from "./Loading";
+import MagicLink from "./MagicLink";
+import Send from "./Send";
+import SideNav from "./SideNav";
 import {
-  default as StableNetwork,
   pubKeyToAddress,
   pubKeyToBytes,
-  transactionSchema,
-  signedTransactionSchema,
+  default as StableNetwork,
 } from "./StableNetwork";
-import { wordlist } from "@scure/bip39/wordlists/english";
-import { base64urlnopad } from "@scure/base";
-import CopyToClipboardButton from "./CopyToClipBoardButton";
-import * as bip39 from "@scure/bip39";
-import Button from "react-bootstrap/Button";
-import Modal from "react-bootstrap/Modal";
-import { HDKey } from "@scure/bip32";
-import Col from "react-bootstrap/Col";
-import Nav from "react-bootstrap/Nav";
-import Row from "react-bootstrap/Row";
-import Tab from "react-bootstrap/Tab";
-import { randomBytes } from "@noble/hashes/utils";
-import { hmac } from "@noble/hashes/hmac";
+import Withdraw from "./Withdraw";
 // import Cookies from 'universal-cookie';
 import "./App.css";
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
@@ -92,22 +74,25 @@ function App() {
     if (!publicKey) {
       return;
     }
-    const es = new EventSource(`sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`, {
-      withCredentials: true,
-    });
-    es.onmessage = ({data}) => {
+    const es = new EventSource(
+      `sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`,
+      {
+        withCredentials: true,
+      },
+    );
+    es.onmessage = ({ data }) => {
       // console.log(JSON.parse(data)j)
-      const {balance, utxos: newUtxos} = JSON.parse(data)
-      setUsdBalance(BigInt(balance))
+      const { balance, utxos: newUtxos } = JSON.parse(data);
+      setUsdBalance(BigInt(balance));
       setUtxos(
-        newUtxos.map(utxo => ({
+        newUtxos.map((utxo) => ({
           ...utxo,
           transaction_id: Buffer.from(utxo.transaction_id, "hex"),
-          value: BigInt(utxo.value)
-        }))
-      )
-    }
-    es.onerror = (e, x) => console.log(e)
+          value: BigInt(utxo.value),
+        })),
+      );
+    };
+    es.onerror = (e, x) => console.log(e);
     return () => es.close();
   }, [publicKey]);
 
