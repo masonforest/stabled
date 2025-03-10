@@ -16,4 +16,10 @@ src/templates/*/*
 src/frontend/dist
 src/frontend/dist-ssr
 src/frontend/*.local
+src/contracts/artifacts
+src/contracts/ignition
+src/contracts/cache
+src/contracts/hardhat.config.js
+
+
 dist
