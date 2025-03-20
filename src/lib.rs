@@ -63,7 +63,7 @@ pub async fn app(pool: PgPool) -> Router {
         .route("/balances/{currency}/{address}", get(get_balance))
         .route("/utxos/{address}", get(get_utxos))
         .route("/sse", get(get_sse))
-        .route("/{transaction_id}", get(get_magic))
+        .route("/{transaction_id}", get(get_index))
         .route("/images/{amount}", get(get_magic_image))
         .route("/", get(get_index))
         .nest_service("/assets", ServeDir::new("templates/assets"))
