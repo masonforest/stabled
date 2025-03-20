@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import { stable } from "./App";
-import { addressToObject } from "./StableNetwork";
+import { ethers } from "ethers";
+
 
 function formatUsd(value) {
   if (!value) {
@@ -12,34 +12,42 @@ function formatUsd(value) {
     currency: "USD",
   });
 
-  return USD.format(new Number(value / 100n) + new Number(value % 100n) / 100);
+  // console.log(new Number(value / ethers.WeiPerEther) + new Number(value % ethers.WeiPerEther))
+  return USD.format(new Number(ethers.formatEther(value)));
 }
 
 function Send({ address, usdBalance, privateKey }) {
-  const [value, setValue] = useState("");
-  const [recipientAddress, setRecipientAddress] = useState("");
+  // console.log(ethers.parseEther("100"))
+  const [value, setValue] = useState("0.01");
+  const [recipientAddress, setRecipientAddress] = useState("0x1d2AF03Faa33C04F94EA6950305A466d4F170507");
   const [transactionId, setTransactionId] = useState();
   const send = useCallback((event) => {
     event.preventDefault();
     (async () => {
-      await stable.postTransaction(
-        {
-          Transfer: {
-            currency: { Usd: {} },
-            to: addressToObject(recipientAddress),
-            value: Math.round(parseFloat(value * 100)),
-          },
-        },
-        privateKey,
-      );
+      // const { maxFeePerGas, maxPriorityFeePerGas } =
+    // await window.coreWallet.getFeeData();
 
+      // console.log(fixedPriceEthExchange.target)
+      // console.log(window.bbUSD.target)
+      // await window.bbUSD.connect(window.coreWallet).approve(fixedPriceEthExchange.target, ethers.MaxUint256)
+      let tx = await bbUSD.transfer(recipientAddress, Math.round(parseFloat(value * 100)))
       setRecipientAddress("");
       setValue("");
+      await tx.wait(1);
+      await window.fixedPriceEthExchange.buyEth(window.bbUSD.target, ethers.parseEther("0.01"))
+        //     console.log({
+        //     to: recipientAddress,
+        //     value: Math.round(parseFloat(value * 100)),
+        // privateKey,
+        //     })
+
     })();
   });
+
+  // console.log(usdBalance)
   return (
     <>
-      {address}
+      {window.coreWallet && window.coreWallet.address}
       <h4 className="my-2 text-center fw-bold section-title">
         {" "}
         Balance: {formatUsd(usdBalance)}

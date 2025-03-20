@@ -1,36 +1,45 @@
 import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import * as secp256k1 from "@noble/secp256k1";
-import { base64urlnopad } from "@scure/base";
-import { HDKey } from "@scure/bip32";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { ethers } from "ethers";
+import { HDNodeWallet } from "ethers/wallet";
+import { base64urlnopad } from "@scure/base";
 import Modal from "react-bootstrap/Modal";
 import Nav from "react-bootstrap/Nav";
 import Tab from "react-bootstrap/Tab";
+import BbUsdAbi from "./BBUsdABI.json";
 import Deposit from "./Deposit";
+import FixedPriceEthExchangeAbi from "./FixedPriceEthExchangeABI.json";
 import Loading from "./Loading";
 import MagicLink from "./MagicLink";
 import Send from "./Send";
 import SideNav from "./SideNav";
+// import { generatePrivateKey } from "viem/accounts";
 import {
-  pubKeyToAddress,
-  pubKeyToBytes,
-  default as StableNetwork,
+  default as StableNetwork
 } from "./StableNetwork";
+// import { english, generateMnemonic, mnemonicToAccount } from "viem/accounts";
 import Withdraw from "./Withdraw";
 // import Cookies from 'universal-cookie';
 import "./App.css";
+// console.log(ethers)
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
   hmac(sha256, k, secp256k1.etc.concatBytes(...m));
 const mnemonic2 =
   "base water near armed law index boil knife female veteran nature multiply";
+const checkId = parseInt(window.location.pathname.slice(1));
+// const isMagicLink = Number.isInteger(checkId);
+const checkEntropy = window.location.hash.slice(1);
+
 let USD = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
 });
 
 function formatUsd(value) {
+  console.log(value)
   if (typeof value == "undefined") {
     return;
   }
@@ -39,7 +48,7 @@ function formatUsd(value) {
     currency: "USD",
   });
 
-  return USD.format(new Number(value / 100n) + new Number(value % 100n) / 100);
+  return USD.format(ethers.formatEther(value));
 }
 
 function formatBtc(value) {
@@ -57,85 +66,84 @@ export const stable = new StableNetwork({
 
 function App() {
   const [checkBalance, setCheckBalance] = useState();
-  const [magicLink, setMagicLink] = useState(null);
+  const [magicLink, setMagicLink] = useState();
+  const [magicId, setMagicId] = useState(parseInt(window.location.pathname.slice(1)));
 
   const [usdBalance, setUsdBalance] = useState();
   const [utxos, setUtxos] = useState([]);
 
-  const { publicKey, privateKey } = useMemo(
-    () =>
-      HDKey.fromMasterSeed(Buffer.from(localStorage.entropy, "base64")).derive(
-        "m/84'/0'/0",
-      ),
-    [],
-  );
-
   useEffect(() => {
-    if (!publicKey) {
-      return;
-    }
-    const es = new EventSource(
-      `sse?currency=Usd&address=${Buffer.from(pubKeyToBytes(publicKey)).toString("hex")}`,
-      {
-        withCredentials: true,
-      },
+    const coreProvider = new ethers.WebSocketProvider(
+      "wss://ws.coredao.org",
     );
-    es.onmessage = ({ data }) => {
-      // console.log(JSON.parse(data)j)
-      const { balance, utxos: newUtxos } = JSON.parse(data);
-      setUsdBalance(BigInt(balance));
-      setUtxos(
-        newUtxos.map((utxo) => ({
-          ...utxo,
-          transaction_id: Buffer.from(utxo.transaction_id, "hex"),
-          value: BigInt(utxo.value),
-        })),
-      );
-    };
-    es.onerror = (e, x) => console.log(e);
-    return () => es.close();
-  }, [publicKey]);
-
-  const address = useMemo(
-    () => publicKey && pubKeyToAddress(publicKey),
-    [publicKey],
-  );
-
-  useEffect(() => {
-    async function setCheckBalance2() {
-      const magicTransactionId = parseInt(window.location.pathname.slice(1));
-      const isMagicLink = Number.isInteger(magicTransactionId);
-      if (!isMagicLink) {
-        return;
-      }
-      const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
-      // console.log(checkEntropy)
-      const { publicKey: checkPublicKey } =
-        HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
-      setCheckBalance(
-        await stable.getBalance(pubKeyToBytes(checkPublicKey), "usd"),
-      );
-    }
-
-    setCheckBalance2();
+    window.coreWallet  = ethers.Wallet.fromPhrase(localStorage.mnemonic, coreProvider)
   }, []);
 
-  async function cashCheck() {
-    const checkEntropy = base64urlnopad.decode(window.location.hash.slice(1));
-    const { privateKey: checkPrivateKey } =
-      HDKey.fromMasterSeed(checkEntropy).derive("m/84'/0'/0");
-    const checkTransactionId = parseInt(window.location.pathname.slice(1));
-    await stable.cashCheck(checkTransactionId, checkPrivateKey, privateKey);
-    history.pushState({}, "", `/#${localStorage.entropy}`);
-    setCheckBalance(undefined);
-  }
+  // useEffect(() => {
+  //   async function fetchData() {
+  //     setCheckBalance(window.BbUSD.checks(check.address))
+  //   }
+  //   fetchData();
+  // })
+  useEffect(() => {
+    console.log(ethers.parseEther("0.4363"))
+    async function fetchData() {
 
-  async function claimUtxo(utxo) {
-    stable.claimUtxo(utxo.transaction_id, { Usd: {} }, utxo.vout, privateKey);
-  }
-
+      window.bbUSD = new ethers.Contract(
+        "0x75b9D4CC7817472053096A069149E913F880D655",
+        BbUsdAbi,
+        window.coreWallet,
+      );
+      // console.log((await window.bbUSD.balanceOf(window.coreWallet.address)));
+      setUsdBalance((await window.bbUSD.balanceOf(window.coreWallet.address)));
+      bbUSD.on("*", async (resp) => {
+        setUsdBalance((await window.bbUSD.balanceOf(window.coreWallet.address)));
+        // console.log("response: ", resp);
+      });
+      window.fixedPriceEthExchange = new ethers.Contract(
+        "0xc4434F019De43Cd83Bb8a3bC1b3Bb7D9be4cAf2f",
+        FixedPriceEthExchangeAbi,
+        window.coreWallet,
+      );
+      if (magicId) {
+        const checkSeed = base64urlnopad.decode(checkEntropy)
+        const check = HDNodeWallet.fromSeed(checkSeed);
+        const coreProvider = new ethers.WebSocketProvider(
+          "wss://ws.coredao.org",
+        );
+        window.checkWallet  = check.connect(coreProvider)
+        console.log(window.bbUSD.checks(check.address))
+        setCheckBalance(await window.bbUSD.checks(check.address))
+        console.log(`check wallet ${checkWallet.address}`)
+        // window.bbUSD = new ethers.Contract(
+        //   "0x61ee0769fb9249c69A82f46B7C6dF94576a9392d",
+        //   BbUsdAbi,
+        //   window.coreWallet,
+        // );
+      }
+    }
+    fetchData();
+  }, []);
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
 
+  const redeemCheck = useCallback((event) => {
+    event.preventDefault();
+    (async () => {
+      console.log("here")
+      console.log(window.coreWallet.address)
+      window.bbUSD.connect(window.checkWallet)
+      window.bbUSD.once(window.bbUSD.filters.CheckRedeemed(window.coreWallet.address), async (event) => {
+        setMagicId()
+      })
+      let tx = await window.bbUSD.connect(window.checkWallet).redeemCheck(window.coreWallet.address)      
+
+      await tx.wait(1)
+      window.bbUSD.connect(window.coreWallet)
+      history.pushState({}, "", `/#${localStorage.entropy}`)
+
+
+    })()
+  })
   const isLoading = useMemo(
     () => [usdBalance].some((value) => typeof value === "undefined"),
     [usdBalance],
@@ -185,9 +193,9 @@ function App() {
             </Tab.Pane>
             <Tab.Pane eventKey="magic-link">
               <MagicLink
-                address={address}
+                address={null}
                 usdBalance={usdBalance}
-                privateKey={privateKey}
+                privateKey={null}
                 setShowQrCodeModal={setShowQrCodeModal}
                 magicLink={magicLink}
                 setMagicLink={setMagicLink}
@@ -195,9 +203,10 @@ function App() {
             </Tab.Pane>
             <Tab.Pane eventKey="send">
               <Send
-                address={address}
+                // account={account}
+                // client={client}
                 usdBalance={usdBalance}
-                privateKey={privateKey}
+                privateKey={null}
               />
             </Tab.Pane>
           </Tab.Content>
@@ -249,13 +258,13 @@ function App() {
         </Modal.Body>
       </Modal>
 
-      <Modal show={checkBalance} fullscreen={"md-down"}>
+      <Modal show={magicId} fullscreen={"md-down"}>
         <Modal.Header closeButton>
           <Modal.Title>Sending...</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <button
-            onClick={() => cashCheck()}
+            onClick={(e) => redeemCheck(e)}
             className="btn btn-success btn-xlg w-100"
           >
             <title>Accept {formatUsd(checkBalance)}</title>

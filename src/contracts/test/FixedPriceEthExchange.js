@@ -1,71 +1,60 @@
-const {
-  time,
-  loadFixture,
-} = require("@nomicfoundation/hardhat-toolbox/network-helpers");
-const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 const { expect } = require("chai");
 
 describe("FixedPriceEthExchange", function () {
-  let fixedPriceEthEthExchange, owner, alice, bob;
+  let bbUSD, fixedPriceEthEthExchange, owner, alice, bob;
+  let initialPrice = ethers.parseEther("0.4360");
 
   beforeEach(async function () {
     [owner, alice, bob] = await ethers.getSigners();
+    // alice = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', ethers.provider) 
 
+    
     const BbUSD = await ethers.getContractFactory("BbUSD");
-    const bbUSD = await BbUSD.deploy(); // Deploy with initial supply and transferValue
+    bbUSD = await BbUSD.deploy();
 
     const FixedPriceEthExchange = await ethers.getContractFactory("FixedPriceEthExchange");
-    fixedPriceEthEthExchange = await FixedPriceEthExchange.deploy(bbUSD); // Deploy with initial supply and transferValue
+    fixedPriceEthEthExchange = await FixedPriceEthExchange.deploy();
+    await fixedPriceEthEthExchange.setPrice(bbUSD.target, initialPrice)
     await owner.sendTransaction({
       to: fixedPriceEthEthExchange.target,
       value: ethers.parseEther("0.004")
     })
+    await owner.sendTransaction({
+      to: alice.address,
+      value: ethers.parseEther("0.004")
+    })
   });
 
-  describe("buyEth", function () {
-    it("should allow owner to update transferCost", async function () {
-      const newTransferCost = ethers.parseEther("0.0002");
+  describe("buyEth", function () {    
+    it("should swap tokens for ETH", async function () {
+    
+    await bbUSD.mint(alice.address, 1n);
+    await bbUSD.connect(alice).approve(fixedPriceEthEthExchange.target, ethers.MaxUint256);
 
-      // Owner updates the transferCost
-      await fixedPriceEthEthExchange.connect(owner).setTransferCost(newTransferCost);
+    const tokenAmount = 1n;
+    // const ethAmount = (tokenAmount * 100n * initialPrice) / ethers.parseEther("1");
+    // console.log(ethAmount)
+    const userEthBalanceBefore = await ethers.provider.getBalance(alice.address);
+    const userTokenBalanceBefore = await bbUSD.balanceOf(alice.address);
+    const contractTokenBalanceBefore = await bbUSD.balanceOf(fixedPriceEthEthExchange.target);
+    
 
-      // Check if the transferCost was updated
-      const updatedTransferCost = await fixedPriceEthEthExchange.transferCost();
-      expect(updatedTransferCost).to.equal(newTransferCost);
-    });
-
-    it("should revert if non-owner tries to update transferCost", async function () {
-      const newTransferCost = ethers.parseEther("0.0002");
-
-      // Alice (non-owner) tries to update the transferCost
-      await expect(fixedPriceEthEthExchange.connect(alice).setTransferCost(newTransferCost))
-      .to.be.revertedWithCustomError(fixedPriceEthEthExchange, "OwnableUnauthorizedAccount");
-    });
+    
+    const tx = await fixedPriceEthEthExchange.connect(alice).buyEth(
+      bbUSD.target,
+      tokenAmount,
+    );
+    
+    const receipt = await tx.wait();
+    const gasCost = receipt.gasUsed * receipt.gasPrice;
+    
+    const userEthBalanceAfter = await ethers.provider.getBalance(alice.address);
+    const userTokenBalanceAfter = await bbUSD.balanceOf(alice.address);
+    const contractTokenBalanceAfter = await bbUSD.balanceOf(fixedPriceEthEthExchange.target);
+    
+    expect(userTokenBalanceAfter).to.equal(userTokenBalanceBefore - tokenAmount);
+    expect(contractTokenBalanceAfter).to.equal(contractTokenBalanceBefore + tokenAmount);
+    // expect(userEthBalanceAfter).to.equal(userEthBalanceBefore + ethAmount - gasCost - 100n);
   });
-
-  describe("transfer", function () {
-    it("sends the sender and recipient enough CORE for a single transaction", async function () {
-      await fixedPriceEthEthExchange.mint(alice, 100) 
-      bob = ethers.Wallet.createRandom(ethers.provider)
-      const alicesBalanceBefore = await ethers.provider.getBalance(alice.address);
-      const bobsBalanceBefore = await ethers.provider.getBalance(bob.address);
-
-      const tx = await fixedPriceEthEthExchange.connect(alice).transfer(bob, 100);
-      const receipt = await tx.wait();
-      const gasCost = receipt.gasUsed * tx.gasPrice;
-      const alicesBalanceAfter = await ethers.provider.getBalance(alice.address);
-      const bobsBalanceAfter = await ethers.provider.getBalance(bob.address);
-      expect(alicesBalanceAfter).to.be.gt(alicesBalanceBefore)
-      expect(alicesBalanceAfter - alicesBalanceBefore ).to.be.equal(ethers.parseEther("0.002") - gasCost)
-      expect(bobsBalanceAfter).to.equal(bobsBalanceBefore + ethers.parseEther("0.002")) 
-    });
-  });
-  describe("create and redeem magic", function () {
-    it("allows for transferring", async function () {
-      await fixedPriceEthEthExchange.mint(alice, 100) 
-      await fixedPriceEthEthExchange.connect(alice).createMagic(bob, 100);
-      await fixedPriceEthEthExchange.connect(bob).redeemMagic();
-      expect(await fixedPriceEthEthExchange.balanceOf(bob)).to.eq(100);
-    });
-  });
+});
 });
