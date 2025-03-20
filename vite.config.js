@@ -11,7 +11,7 @@ export default defineConfig(({ command }) => {
     outDir: "../../templates",
     rollupOptions: {
       input: {
-          magic: './src/frontend/magic.html',
+          index: './src/frontend/index.html',
       }
     }
   },
