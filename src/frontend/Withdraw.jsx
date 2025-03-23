@@ -8,7 +8,6 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import * as btc from "@scure/btc-signer";
 import * as borsh from "borsh";
 import { BorshSchema, borshSerialize } from "borsher";
-import "./App.css";
 import StableNetwork from "./StableNetwork";
 
 const STABLE_MULTI_SIG_ADDRESS =

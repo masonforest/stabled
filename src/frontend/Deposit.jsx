@@ -6,7 +6,6 @@ import * as bip39 from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import * as btc from "@scure/btc-signer";
 import { Col, Container, Row } from "react-bootstrap";
-import "./App.css";
 import StableNetwork from "./StableNetwork";
 
 const STABLE_MULTI_SIG_ADDRESS =

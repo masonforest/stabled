@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -9,25 +9,40 @@ contract FixedPriceEthExchange is Ownable {
 
     constructor() Ownable(msg.sender) {}
 
-    function sellEth(IERC20 token) external payable {
-        uint256 tokensToBuy = (msg.value * 1e18) / prices[token];
-        token.transfer(msg.sender, tokensToBuy);
+    function buyEthAndCallWithTokens(
+        IERC20 token,
+        IERC20 tokenToTransfer,
+        uint256 tokenAmount,
+        uint256 ethAmount,
+        address contractAddress,
+        bytes calldata callData,
+        uint256 callValue
+    ) external returns (bool, bytes memory) {
+        tokenToTransfer.transferFrom(
+            msg.sender,
+            address(this),
+            tokenAmount
+        );
+        chargeToken(token, ethAmount + callValue);
+        payable(msg.sender).transfer(ethAmount);
+        return contractAddress.call{value: callValue}(callData);
     }
 
-    function buyEth(IERC20 token, uint256 tokenAmount) external {
-        uint256 ethToReturn = (tokenAmount * prices[token]) / 1e18;
-        token.transferFrom(msg.sender, address(this), tokenAmount);
-        payable(msg.sender).transfer(ethToReturn);
+    function chargeToken(IERC20 token, uint256 ethAmount) internal {
+        token.transferFrom(
+            msg.sender,
+            address(this),
+            ((ethAmount * prices[token]) / 1000000 / 1 ether)
+        );
     }
 
     function setPrice(IERC20 token, uint256 price) external onlyOwner {
         prices[token] = price;
     }
-    
-    function withdrawEth(uint256 amount) external onlyOwner {
-        payable(owner()).transfer(amount);
+
+    function withdrawAllEth() external onlyOwner {
+        payable(owner()).transfer(address(this).balance);
     }
 
-    receive() external payable {
-    }
+    receive() external payable {}
 }

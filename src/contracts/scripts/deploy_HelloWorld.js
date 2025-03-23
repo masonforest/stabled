@@ -10,7 +10,6 @@ async function main() {
   });
   await helloWorld.waitForDeployment();
   console.log(helloWorld.target);
-
 }
 main().catch((error) => {
   console.error(error);

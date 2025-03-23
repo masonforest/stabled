@@ -15,59 +15,49 @@ function formatUsd(value) {
     currency: "USD",
   });
 
-  // console.log(new Number(value / ethers.WeiPerEther) + new Number(value % ethers.WeiPerEther))
-  return USD.format(new Number(ethers.formatEther(value)));
+  return USD.format(new Number(value / 100n) + new Number(value % 100n) / 100);
 }
 
 function MagicLink({
   address,
   usdBalance,
-  privateKey,
   setShowQrCodeModal,
   setMagicLink,
   magicLink,
 }) {
-  //   const [magicLink, setMagicLink] = usmaeState(null);
   const [inputValue, setInputValue] = useState("0.01");
 
   async function send(e) {
     e.preventDefault();
-    // let checkEntropy = randomBytes(16);
-    const checkSeed = randomBytes(16); 
+    const checkSeed = randomBytes(16);
     const check = HDNodeWallet.fromSeed(checkSeed);
-    
-    // let check = ethers.Wallet.createRandom()
-    // console.log(check.privateKey)
-    // console.log(check.address)
-// console.log(check.mnemonic.entropy)
-    window.bbUSD.once(window.bbUSD.filters.CheckFunded(null, window.coreWallet.address), async (event) => {
-      // console.log(event.args[0])
-      // console.log((new TextDecoder()).decode(checkSeed).length)
-      // console.log(checkSeed)
-      // console.log(base64urlnopad.encode(checkSeed).length)
-      console.log(check.address)
-      setMagicLink(
-        `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${event.args[0]}#${base64urlnopad.encode(checkSeed)}`,
-      );
-    })
-    let tx = await bbUSD.fundCheck(check.address ,ethers.parseEther(inputValue))
-    setInputValue("")
-    await tx.wait(1);
-    tx = await window.coreWallet.sendTransaction(
-      {
-       to: check.address,
-       value:  ethers.parseEther("0.01"), 
-      }
-    )
-    await tx.wait(1);
-    console.log(tx)
-    window.fixedPriceEthExchange.buyEth(window.bbUSD.target, ethers.parseEther("0.02"))
+
+    let callData = await window.checkBook.interface.encodeFunctionData(
+      "fundCheck",
+      [
+        window.bbUSD.target,
+        check.address,
+        BigInt(parseFloat(inputValue) * 100),
+      ],
+    );
+
+    let tx = await window.fixedPriceEthExchange.buyEthAndCallWithTokens(
+      window.bbUSD.target,
+      window.bbUSD.target,
+      BigInt(parseFloat(inputValue) * 100),
+      ethers.parseEther("0.012"),
+      window.checkBook.target,
+      callData,
+      ethers.parseEther("0.008"),
+    );
+
+    const logs = (await tx.wait(1)).logs;
+    let checkId = window.checkBook.interface.parseLog(logs[3]).args[1];
+    setMagicLink(
+      `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${checkId}#${base64urlnopad.encode(checkSeed)}`,
+    );
+    setInputValue("");
   }
-
-  useEffect(() => {
-    // console.log(contract.filters.CheckFunded(null, window.coreWallet.address))
-  },[]);
-
 
   return (
     <>

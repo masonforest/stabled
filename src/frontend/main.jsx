@@ -8,15 +8,15 @@ import App from "./App.jsx";
 const { concatBytes } = packedUtils;
 globalThis.Buffer = Buffer;
 
-  import("bootstrap/dist/css/bootstrap.min.css");
-  import("./index.css");
-  createRoot(document.getElementById("root")).render(<App />);
+import("./index.css");
+import "bootstrap/dist/css/bootstrap.min.css";
+import "./App.css";
+createRoot(document.getElementById("root")).render(<App />);
 const checkId = parseInt(window.location.pathname.slice(1));
 const isMagicLink = Number.isInteger(checkId);
 const checkEntropy = window.location.hash.slice(1);
 
-
-localStorage.mnemonic ||=  ethers.Wallet.createRandom().mnemonic.phrase
+localStorage.mnemonic ||= ethers.Wallet.createRandom().mnemonic.phrase;
 // const checkEntropy = window.location.hash.slice(1);
 // function loadWallet() {
 //   document.getElementById("wallet_buttons").style.display = "none";
