@@ -3,16 +3,15 @@ mod address;
 pub mod constants;
 use alloy::providers::ProviderBuilder;
 pub mod core;
-use crate::BBUSD::Transfer;
+use crate::{BBUSD::Transfer, core::BBUSD};
 use alloy::sol_types::SolEvent;
-use crate::core::BBUSD;
 pub mod db;
 use alloy::{
     contract::{ContractInstance, Interface},
     dyn_abi::DynSolValue,
     network::TransactionBuilder,
-    primitives::{hex, U256, Log, Address, address },
-    providers::{Provider},
+    primitives::{Address, Log, U256, address, hex},
+    providers::Provider,
     rpc::types::TransactionRequest,
 };
 use tokio::{time, time::Duration};
@@ -69,7 +68,9 @@ struct IndexTemplate {
 
 pub async fn app(app_state: AppState) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::exact("http://192.168.0.11:5173".parse().unwrap()))
+        .allow_origin(AllowOrigin::exact(
+            "http://192.168.0.11:5173".parse().unwrap(),
+        ))
         .allow_headers(vec![header::CONTENT_TYPE])
         .allow_methods(vec![Method::POST, Method::GET])
         .allow_credentials(true);
@@ -271,7 +272,9 @@ async fn get_magic(
     let rpc_url = "https://rpc.ankr.com/core".parse().unwrap();
     let provider = ProviderBuilder::new().on_http(rpc_url);
 
-    let path = std::env::current_dir().unwrap().join("src/frontend/abi/contracts/CheckBook.sol/CheckBook.json");
+    let path = std::env::current_dir()
+        .unwrap()
+        .join("src/frontend/abi/contracts/CheckBook.sol/CheckBook.json");
 
     // Read the artifact which contains `abi`, `bytecode`, `deployedBytecode` and `metadata`.
     let artifact = std::fs::read(path).expect("Failed to read artifact");
@@ -281,7 +284,11 @@ async fn get_magic(
     let abi = serde_json::from_str(&json.to_string()).unwrap();
 
     // Create a new `ContractInstance` of the `Counter` contract from the abi
-    let contract = ContractInstance::new(address!("0x92Ec2ac50CFeBea0A4AE6ce5df7DB0cC90FF42a9"), provider.clone(), Interface::new(abi));
+    let contract = ContractInstance::new(
+        address!("0x92Ec2ac50CFeBea0A4AE6ce5df7DB0cC90FF42a9"),
+        provider.clone(),
+        Interface::new(abi),
+    );
     // let address_value = contract.function("checkIds", &[
     //     DynSolValue::from(address!("0xa84c5626954d01e0200050a800e9cdc3a00de7ff")),
     //     DynSolValue::from(U256::from(check_id))
@@ -289,17 +296,27 @@ async fn get_magic(
     // ]).unwrap().call().await.unwrap();
     // let address = address_value.first().unwrap().as_address().unwrap().0;
     // println!("check address {:?}", address_value);
-    let amount_value = contract.function("getCheckAmount", &[
-        DynSolValue::from(address!("0xa84c5626954d01e0200050a800e9cdc3a00de7ff")),
-        DynSolValue::from(U256::from(check_id))
-        // address_value.first().unwrap().clone()
-    ]).unwrap().call().await.unwrap();
+    let amount_value = contract
+        .function(
+            "getCheckAmount",
+            &[
+                DynSolValue::from(address!("0xa84c5626954d01e0200050a800e9cdc3a00de7ff")),
+                DynSolValue::from(U256::from(check_id)), // address_value.first().unwrap().clone()
+            ],
+        )
+        .unwrap()
+        .call()
+        .await
+        .unwrap();
     let amount = amount_value.first().unwrap().as_uint().unwrap().0;
     let template = IndexTemplate {
-        title: format!(
+        title: "Stable Network Wallet".to_string(),
+
+        description: Some(format!(
             "Accept ${} on the Stable Network",
             Decimal::new(amount.to::<i64>(), 2)
-        ),
+        )),
+        image: Some(format!("/images/{}", amount.to::<i64>())),
         ..Default::default()
     };
     Ok(HtmlTemplate(template))
@@ -326,7 +343,7 @@ async fn get_sse(
     //         .unwrap(),
     // );
     // let currency = sse_params.currency.clone();
-    let receiver = state.log_receiver.lock().await.resubscribe(); 
+    let receiver = state.log_receiver.lock().await.resubscribe();
     // let receiver = state.log_receiver.lock().await.subscribe();
     let mut event_stream = BroadcastStream::new(receiver).filter(move |maybe_transfer| {
         return true;
@@ -349,7 +366,8 @@ async fn get_sse(
                             "transactionHash": transaction_hash,
                             "log": log.reserialize()
                         }))
-                            .unwrap())
+                        .unwrap(),
+                )
                 .is_err()
             {
                 break;
@@ -433,7 +451,6 @@ async fn get_magic_image(
     input.arg("PNG:-");
     Ok((headers, input.output().unwrap().stdout))
 }
-
 
 // #[cfg(test)]
 // mod tests {

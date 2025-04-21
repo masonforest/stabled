@@ -2,13 +2,13 @@ use alloy::primitives::{Address, Log, address};
 use axum::{Router, http::uri::Uri, response::Redirect, routing::get};
 use axum_extra::extract::Host;
 use bitcoin::{Network, PrivateKey, PublicKey, key::Secp256k1};
-use stable::core::BBUSD::Transfer;
 use dotenv::dotenv;
 use rustls_acme::{AcmeConfig, caches::DirCache};
 use sqlx::postgres::PgPoolOptions;
 use stable::{
     AppState,
     constants::{ENV, Env, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT},
+    core::BBUSD::Transfer,
 };
 use std::{env, net::Ipv6Addr, path::PathBuf, sync::Arc};
 use tokio::{spawn, sync::Mutex};
@@ -29,8 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // println!("{}", x.to_string());
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new().connect(&database_url).await?;
-    let (log_sender, log_receiver) = tokio::sync::broadcast::channel::<([u8; 32], Transfer)>(1000000);
-    // let log_receiver2 = log_receiver.clone(); 
+    let (log_sender, log_receiver) =
+        tokio::sync::broadcast::channel::<([u8; 32], Transfer)>(1000000);
+    // let log_receiver2 = log_receiver.clone();
     let app_state = AppState {
         pool: Arc::new(Mutex::new(pool.clone())),
         log_receiver: Arc::new(Mutex::new(log_receiver)),

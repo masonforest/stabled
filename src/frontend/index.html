@@ -5,10 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <title>{{ title }}</title>
+      <meta property="og:title" content="{{title}}">
+    {% if let Some(description) = description %}
+      <meta property="og:description" content="{{description}}">
+    {% endif %}
     {% if let Some(image) = image %}
-      <meta property="og:title" content="{title}">
-      <meta property="og:description" content="{description}">
-      <meta property="og:image" content="{image}">
+      <meta property="og:image" content="{{image}}">
     {% endif %}
     <link
       rel="stylesheet"

@@ -1,18 +1,16 @@
 use futures_util::stream::StreamExt;
 // use alloy::providers::WsConnect;
-use crate::{AppState, db};
+use crate::{AppState, BBUSD::Transfer, db};
 use alloy::{
-    primitives::{address, Log},
+    primitives::{Log, address},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{BlockNumberOrTag, Filter},
     sol,
     sol_types::SolEvent,
 };
-use crate::BBUSD::Transfer;
-use tokio::sync::broadcast::Sender;
 use sqlx::PgPool;
 use std::{io::Read, time::Duration};
-use tokio::time;
+use tokio::{sync::broadcast::Sender, time};
 sol!(
     #[allow(missing_docs)]
     #[derive(Default, Debug)]
@@ -63,7 +61,9 @@ pub async fn subscribe(pool: &PgPool, log_sender: Sender<([u8; 32], Transfer)>) 
                 .await
                 .unwrap();
                 // println!("log sse");
-                log_sender.send((log.transaction_hash.unwrap().0.into(), transfer)).unwrap();
+                log_sender
+                    .send((log.transaction_hash.unwrap().0.into(), transfer))
+                    .unwrap();
                 // app_state.update_channel.lock().await.0.send((from, log.clone().into())).unwrap();
                 // app_state.update_channel.lock().await.0.send((to, log.into())).unwrap();
                 // println!("Transfer from {from} to {to} of value {value}");
