@@ -33,7 +33,7 @@ function Send({
 }) {
   const [key, setKey] = useState("toAddress");
 
-  const [value, setValue] = useState("0.01");
+  const [value, setValue] = useState(import.meta.env.DEV ? "0.01" : null);
   const [recipientAddress, setRecipientAddress] = useState(
     import.meta.env.DEV ? "0x74FC3892938318123E37C2304d03aeC09DC506Eb": null
   );
