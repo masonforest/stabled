@@ -69,12 +69,10 @@ function Send({
     const checkSeed = randomBytes(16);
     const check = HDNodeWallet.fromSeed(checkSeed);
 
-    console.log("here")
     let callData = await window.checkBook.interface.encodeFunctionData(
       "fundCheck",
       [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
     );
-    console.log("here 1")
     const { gasPrice } = await window.coreWallet.provider.getFeeData();
 
     const estimatedGas = await window.fixedPriceEthExchange.buyEthAndCallWithTokens.estimateGas(
@@ -87,14 +85,11 @@ function Send({
       ethers.parseEther("0.008"),
     );
 
-    console.log("here 2")
-    console.log(estimatedGas * gasPrice)
-    console.log(window.bbUSD.target)
     let tx = await window.fixedPriceEthExchange.buyEthAndCallWithTokens(
       window.bbUSD.target,
       window.bbUSD.target,
       BigInt(parseFloat(value) * 100),
-      estimatedGas * gasPrice,
+      estimatedGas * gasPrice + ethers.parseEther("0.01"),
       window.checkBook.target,
       callData,
       ethers.parseEther("0.008"), {
@@ -103,7 +98,6 @@ function Send({
     );
 
     const logs = (await tx.wait(1)).logs;
-    console.log(logs)
     let checkId = window.checkBook.interface.parseLog(logs[3]).args[1];
     setMagicLink(
       `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${checkId}#${base64urlnopad.encode(checkSeed)}`,
