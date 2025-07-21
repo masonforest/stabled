@@ -1,6 +1,6 @@
+const { UInt32Schema } = require("bitcoinjs-lib/src/types");
 const { expect } = require("chai");
-const { formatEther, HDNodeWallet } = require("ethers");
-
+const { formatEther, HDNodeWallet, UndecodedEventLog } = require("ethers");
 
 describe("FixedPriceEthExchange", function () {
   let bbUSD, checkBook, fixedPriceEthEthExchange, owner, alice, bob;
@@ -24,7 +24,7 @@ describe("FixedPriceEthExchange", function () {
     await bbUSD.preApprove(checkBook.target);
     await owner.sendTransaction({
       to: fixedPriceEthEthExchange.target,
-      value: ethers.parseEther("1.004"),
+      value: ethers.parseEther("1.008"),
     });
     await owner.sendTransaction({
       to: alice.address,
@@ -32,23 +32,26 @@ describe("FixedPriceEthExchange", function () {
     });
   });
 
-  describe("buyEthAndCallWithTokens", function () {
-    it("should swap tokens for ETH call a function", async function () {
+  describe("buyEthAndCall", function () {
+    it.only("should swap tokens for ETH call a function", async function () {
       await bbUSD.mint(alice.address, 200n);
       await bbUSD
         .connect(alice)
         .approve(fixedPriceEthEthExchange.target, ethers.MaxUint256);
 
       const ethAmount = ethers.parseEther("1");
-      const callValue = ethers.parseEther("0.004"); 
+      const transferFromCallData = bbUSD.interface.encodeFunctionData(
+        "transferFrom",
+        [alice.address, fixedPriceEthEthExchange.target, 100n],
+      );
+      // const callValue2 = ethers.parseEther("0.008");
       let check = ethers.Wallet.createRandom(ethers.provider);
       const tokenAmount =
         (ethAmount * initialPrice) / (1000000n * ethers.parseEther("1"));
-      const callData = checkBook.interface.encodeFunctionData("fundCheck", [
-        bbUSD.target,
-        check.address,
-        100n,
-      ]);
+      const fundCheckCallData = checkBook.interface.encodeFunctionData(
+        "fundCheck",
+        [bbUSD.target, check.address, 100n],
+      );
 
       const userEthBalanceBefore = await ethers.provider.getBalance(
         alice.address,
@@ -58,19 +61,25 @@ describe("FixedPriceEthExchange", function () {
         fixedPriceEthEthExchange.target,
       );
 
-      const tx = await fixedPriceEthEthExchange
-        .connect(alice)
-        .buyEthAndCallWithTokens(
-            bbUSD.target,
-            bbUSD.target,
-            100n,
-            ethAmount,
-            checkBook.target,
-            callData,
-            callValue,
-          );
+      const tx = await fixedPriceEthEthExchange.connect(alice).buyEthAndCall(
+        bbUSD.target,
+        ethAmount,
+        [
+          {
+            target: bbUSD.target,
+            data: transferFromCallData,
+            value: 0,
+          },
+          {
+            target: checkBook.target,
+            data: fundCheckCallData,
+            value: ethers.parseEther("0.008"),
+          },
+        ],
+        new Uint8Array(),
+      );
 
-      await checkBook.connect(check).redeemCheck(bbUSD.target, bob)
+      await checkBook.connect(check).redeemCheck(bbUSD.target, bob);
 
       const receipt = await tx.wait();
       const gasCost = receipt.gasUsed * receipt.gasPrice;
@@ -86,8 +95,12 @@ describe("FixedPriceEthExchange", function () {
       expect(userTokenBalanceAfter).to.equal(
         userTokenBalanceBefore - (tokenAmount + 100n),
       );
-      expect(contractTokenBalanceAfter).to.equal(contractTokenBalanceBefore + tokenAmount);
-      expect(userEthBalanceAfter).to.equal(userEthBalanceBefore + ethAmount - gasCost);
+      expect(contractTokenBalanceAfter).to.equal(
+        contractTokenBalanceBefore + tokenAmount,
+      );
+      expect(userEthBalanceAfter).to.equal(
+        userEthBalanceBefore + ethAmount - gasCost,
+      );
     });
   });
 });

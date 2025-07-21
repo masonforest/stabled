@@ -2,8 +2,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::Deserialize;
 use std::str::FromStr;
 
-#[cfg(test)]
-use k256::ecdsa::SigningKey;
 
 #[derive(
     Hash,

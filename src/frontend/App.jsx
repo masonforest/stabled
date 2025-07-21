@@ -2,25 +2,37 @@ import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import * as secp256k1 from "@noble/secp256k1";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef , useReducer, memo} from "react";
 import { ethers } from "ethers";
+import * as secp from '@noble/secp256k1';
 import { HDNodeWallet } from "ethers/wallet";
 import { base64urlnopad } from "@scure/base";
+import { uniqBy } from "lodash";
 import Modal from "react-bootstrap/Modal";
 import Nav from "react-bootstrap/Nav";
 import Tab from "react-bootstrap/Tab";
 import BbUsdAbi from "./abi/contracts/BbUSD.sol/BbUSD.json";
+import HDWalletMessengerAbi from "./abi/contracts/HDWalletMessenger.sol/HDWalletMessenger.json";
 import Deposit from "./Deposit";
 import FixedPriceEthExchangeAbi from "./abi/contracts/FixedPriceEthExchange.sol/FixedPriceEthExchange.json";
 import CheckBookAbi from "./abi/contracts/CheckBook.sol/CheckBook.json";
 import Loading from "./Loading";
 import MagicLink from "./MagicLink";
 import Send from "./Send";
+import Transaction from "./Transaction";
 import SideNav from "./SideNav";
+import * as bip39 from "@scure/bip39";
 // import { generatePrivateKey } from "viem/accounts";
 import { default as StableNetwork } from "./StableNetwork";
 // import { english, generateMnemonic, mnemonicToAccount } from "viem/accounts";
 import Withdraw from "./Withdraw";
+// import { PrivateKey, decrypt, encrypt } from "eciesjs";
+import { wordlist as english } from "@scure/bip39/wordlists/english";
+import { HDKey } from "@scure/bip32";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha";
+import { utf8ToBytes } from "@noble/ciphers/utils";
+import { randomBytes } from "@noble/ciphers/webcrypto";
+// import { Transaction } from "bitcoinjs-lib";
 // import Cookies from 'universal-cookie';
 // console.log(ethers)
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
@@ -62,25 +74,68 @@ export const stable = new StableNetwork({
   development: import.meta.env.DEV,
 });
 
+function decryptForRecipient(privateKey, encryptedMessage) {
+  const ephemeralPublicKey = encryptedMessage.slice(0, 33);
+  const nonce = ephemeralPublicKey.slice(0,24);
+  const ciphertext = encryptedMessage.slice(33);
+  const secret = secp.getSharedSecret(privateKey, ephemeralPublicKey, true);
+  const key = secret.slice(0, 32);
+  console.log("decoded")
+  console.log(xchacha20poly1305(key, nonce).decrypt(ciphertext))
+  return new TextDecoder().decode(xchacha20poly1305(key, nonce).decrypt(ciphertext));
+}
+
+async function encrypt(ephemeralPrivateKey, publicKey, message) {
+  const ephemeralPublicKey = secp.getPublicKey(ephemeralPrivateKey, true);
+  const nonce = ephemeralPublicKey.slice(0, 24);
+  const secret = secp.getSharedSecret(ephemeralPrivateKey, publicKey, true);
+  const key = secret.slice(0, 32);
+  const ciphertext = xchacha20poly1305(key, nonce).encrypt(message);
+  const encrypted = new Uint8Array(33 + ciphertext.length);
+  encrypted.set(ephemeralPublicKey, 0);
+  encrypted.set(ciphertext, 33);
+
+  return encrypted;
+}
+
 function App() {
-  const [transactions, setTransactions] = useState([
-    // "0x409e28d995478f3f5236756451d77a1b8930e05d299e11cd632ea1721ab49451",
-  ]);
+  // const [transactions, setTransactions] = useState([
+  //   // "0x409e28d995478f3f5236756451d77a1b8930e05d299e11cd632ea1721ab49451",
+  // ]);
+  const [transactions, addTransaction] = useReducer((state, action) => [action,...state], [])
   const [checkBalance, setCheckBalance] = useState();
+  const [checkMemo, setCheckMemo] = useState();
   const [magicLink, setMagicLink] = useState();
-  const [magicId, setMagicId] = useState(
+  const [checkAddress, setCheckAddress] = useState(
     parseInt(window.location.pathname.slice(1)),
   );
 
   const [usdBalance, setUsdBalance] = useState();
   const [utxos, setUtxos] = useState([]);
 
+  const esRef = useRef(null);
+
   useEffect(() => {
-    const coreProvider = new ethers.JsonRpcProvider("https://rpc.coredao.org");
+    const coreProvider = new ethers.JsonRpcProvider("https://lb.drpc.org/core/AnBEZF95LU2KkyY4vqliaV7LHpqrXcIR8JkHrqRhf0fE");
     window.coreWallet = ethers.Wallet.fromPhrase(
       localStorage.mnemonic,
       coreProvider,
     );
+    // console.log(base64urlnopad.encode(ethers.getBytes(window.coreWallet.publicKey)))
+    const seed = bip39.mnemonicToEntropy(localStorage.mnemonic, english);
+
+    // const sk = new PrivateKey(); //HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0" ));
+    const data = Buffer.from("hello world🌍");
+    // const decrypted = decrypt(sk.secret, encrypt(sk.publicKey.toBytes(), data));
+
+    const key = randomBytes(32);
+    const nonce = randomBytes(24);
+    const chacha = xchacha20poly1305(key, nonce);
+    const data2 = utf8ToBytes("");
+
+    const ciphertext = chacha.encrypt(data2);
+
+    const data3 = chacha.decrypt(ciphertext);
   }, []);
 
   // useEffect(() => {
@@ -89,21 +144,45 @@ function App() {
   //   }
   //   fetchData();
   // })
+  // useEffect(() => {
+  //   async function fetchTransactions() {
+  //     const response = await fetch(`http://192.168.0.11/transactions?address=${window.coreWallet.address}`);
+      
+  //     // setTransactions([
+  //     //   ...transactions,
+  //     //   ...await response.json()
+  //     // ])
+  //   }
+  //   if(!transactions.length) {
+  //     fetchTransactions()
+  //   }
+  // }, [])
   useEffect(() => {
-    const es = new EventSource(
-      `http://192.168.0.11/sse?address=${window.coreWallet.address}`,
-      {
-        withCredentials: true,
-      },
-    );
-    es.onmessage = async ({ data }) => {
-      const { log, transactionHash } = JSON.parse(data);
-      let event = window.bbUSD.interface.parseLog(log);
-      setUsdBalance(await window.bbUSD.balanceOf(window.coreWallet.address));
+    if (!esRef.current) {
+      esRef.current = new EventSource(
+        `/sse?address=${window.coreWallet.address}`,
+        {
+          withCredentials: true,
+        },
+      );
+      esRef.current.onmessage = async ({ data }) => {
+        // console.log(JSON.parse(data))
+        // console.log(transactions.length)
+        addTransaction(
+          JSON.parse(data),
+        )
+      }
+      // const { log, transactionHash } = JSON.parse(data);
+      // let event = window.bbUSD.interface.parseLog(log);
+      // setUsdBalance(await window.bbUSD.balanceOf(window.coreWallet.address));
     };
-    es.onerror = (e, x) => console.log(e);
-    return () => es.close();
-  }, []);
+    esRef.current.onerror = (e, x) => console.log(e);
+    return () => {
+      console.log("closing")
+      esRef.current && esRef.current.close();
+      esRef.current = null;
+    };
+  }, [addTransaction]);
   useEffect(() => {
     async function fetchData() {
       window.bbUSD = new ethers.Contract(
@@ -113,7 +192,7 @@ function App() {
       );
 
       window.checkBook = new ethers.Contract(
-        "0x92Ec2ac50CFeBea0A4AE6ce5df7DB0cC90FF42a9",
+        "0x168b0e3a5aD6343Ea1BAc552F72D8C7a88Cf65D6",
         CheckBookAbi,
         window.coreWallet,
       );
@@ -123,40 +202,108 @@ function App() {
       // setUsdBalance((await window.bbUSD.balanceOf(window.coreWallet.address)));
       // console.log("response: ", resp);
       // });
+      window.hDWalletMessenger = new ethers.Contract(
+        "0x6F39c7c97e5A095A595774e2D773fD253d1eD1a7",
+        HDWalletMessengerAbi,
+        window.coreWallet,
+      );
       window.fixedPriceEthExchange = new ethers.Contract(
-        "0xeee7616a6e44f8C91e4a52dB33B75B782Aa55f65",
+        "0x6d78354C0Cf8a74549Dffc392F55e4A0E95dDbE3",
         FixedPriceEthExchangeAbi,
         window.coreWallet,
       );
-      if (magicId) {
+      if (checkAddress) {
         const checkSeed = base64urlnopad.decode(checkEntropy);
         const check = HDNodeWallet.fromSeed(checkSeed);
         const coreProvider = new ethers.JsonRpcProvider(
-          "https://rpc.coredao.org",
+          "https://rpc-core.icecreamswap.com",
         );
         window.checkWallet = check.connect(coreProvider);
         setCheckBalance(
-          await window.checkBook.checkAmounts(window.bbUSD.target, check.address),
+          await window.checkBook.checkAmounts(
+            window.bbUSD.target,
+            check.address,
+          ),
         );
+        const log = await window.coreWallet.provider.getLogs({
+                      address: window.checkBook.target,
+                      fromBlock: 0,
+                      topics: [
+                        window.checkBook.interface.getEvent("CheckFunded").topicHash,
+                        null,
+                        ethers.zeroPadValue(
+                          check.address.toLowerCase(),
+                          32,
+                        ),
+                      ],
+                    });
+                    console.log(log)
+            const tx = await window.coreWallet.provider.getTransaction(log[0].transactionHash)
+            const decodedData = window.fixedPriceEthExchange.interface.decodeFunctionData("buyEthAndCall", tx.data);
+            console.log(await decryptForRecipient(ethers.getBytes(check.privateKey), ethers.getBytes(decodedData[3])))
+            setCheckMemo(
+              await decryptForRecipient(ethers.getBytes(check.privateKey), ethers.getBytes(decodedData[3]))
+            );
+
         // window.bbUSD = new ethers.Contract(
         //   "0x61ee0769fb9249c69A82f46B7C6dF94576a9392d",
         //   BbUsdAbi,
         //   window.coreWallet,
         // );
       }
+      // setTransactions(
+      //   uniqBy(
+      //     Object.values(
+      //       Object.groupBy(
+      //         [
+      //           ...(await window.coreWallet.provider.getLogs({
+      //             address: window.bbUSD.target,
+      //             fromBlock: 0,
+      //             topics: [
+      //               window.bbUSD.interface.getEvent("Transfer").topicHash,
+      //               null,
+      //               ethers.zeroPadValue(
+      //                 window.coreWallet.address.toLowerCase(),
+      //                 32,
+      //               ),
+      //             ],
+      //           })),
+      //           ...(await window.coreWallet.provider.getLogs({
+      //             address: window.bbUSD.target,
+      //             fromBlock: 0,
+      //             topics: [
+      //               window.bbUSD.interface.getEvent("Transfer").topicHash,
+      //               ethers.zeroPadValue(
+      //                 window.coreWallet.address.toLowerCase(),
+      //                 32,
+      //               ),
+      //             ],
+      //           })),
+      //         ].reverse(),
+      //         ({ transactionHash }) => transactionHash,
+      //       ),
+      //     ).flatMap((logs) =>
+      //       logs.map((log) => ({
+      //         ...bbUSD.interface.parseLog(log),
+      //         transactionHash: log.transactionHash,
+      //       })),
+      //     ),
+      //     "transactionHash",
+      //   ),
+      // );
     }
     fetchData();
   }, []);
-  const [showQrCodeModal, setShowQrCodeModal] = useState(false);
+
+  // console.log(transactions.map((t) => t.transactionHash))
 
   const redeemCheck = useCallback(
     (event) => {
       event.preventDefault();
       (async () => {
-        console.log(window.coreWallet.address);
         window.bbUSD.connect(window.checkWallet);
         // window.bbUSD.once(window.bbUSD.filters.CheckRedeemed(window.coreWallet.address), async (event) => {
-        //   setMagicId()
+        //   setCheckAddress()
         // })
 
         const checkAmount = await window.checkBook.checkAmounts(
@@ -164,16 +311,34 @@ function App() {
           window.checkWallet.address,
         );
         setUsdBalance(usdBalance + checkAmount);
-        setMagicId();
+        setCheckAddress();
         history.pushState({}, "", `/`);
+        console.log("before")
+        console.log(checkMemo)
+        let ephemeralPublicKeyAndCipherText = await encrypt(
+          ethers.getBytes(window.checkWallet.privateKey),
+          ethers.getBytes(window.coreWallet.publicKey),
+          new TextEncoder().encode(checkMemo)
+        );
+        console.log(window.coreWallet.privateKey)
+        console.log(Buffer.from(ephemeralPublicKeyAndCipherText).toString("hex"))
+
+        console.log(decryptForRecipient(
+          ethers.getBytes(window.coreWallet.privateKey),
+          ephemeralPublicKeyAndCipherText)
+        )
+        console.log("after")
         let tx = await window.checkBook
           .connect(window.checkWallet)
-          .redeemCheck(bbUSD.target, window.coreWallet.address);
-          setTransactions([tx.hash, ...transactions]);
+          .redeemCheck(
+            bbUSD.target,
+            window.coreWallet.address,
+            window.coreWallet.publicKey,
+            ephemeralPublicKeyAndCipherText
+          );
       })();
-      
     },
-    [usdBalance],
+    [usdBalance, checkMemo],
   );
   const isLoading = useMemo(
     () => [usdBalance].some((value) => typeof value === "undefined"),
@@ -195,7 +360,6 @@ function App() {
             </a>
           </div>
           <div className="brand-logo">Stable Network Wallet</div>
-          {window.coreWallet && window.coreWallet.address}{" "}
           <form className="searchbar">
             <div className="position-absolute top-50 translate-middle-y search-icon start-0">
               <i className="bi bi-search"></i>
@@ -224,27 +388,23 @@ function App() {
               <Withdraw />
             </Tab.Pane>
             <Tab.Pane eventKey="magic-link">
-              <MagicLink
-                address={null}
-                usdBalance={usdBalance}
-                privateKey={null}
-                setShowQrCodeModal={setShowQrCodeModal}
-                magicLink={magicLink}
-                setMagicLink={setMagicLink}
-              />
             </Tab.Pane>
             <Tab.Pane eventKey="send">
               <Send
                 usdBalance={usdBalance}
                 magicLink={magicLink}
-                setShowQrCodeModal={setShowQrCodeModal}
-                setMagicLink={setMagicLink}
                 privateKey={null}
-                transactions={transactions}
-                setTransactions={setTransactions}
               />
             </Tab.Pane>
           </Tab.Content>
+          {transactions.map((transaction) => {
+            return (
+              <Transaction
+                key={transaction.transactionHash}
+                transaction={transaction}
+              ></Transaction>
+            );
+          })}
           <footer className="page-footer fixed-bottom border-top d-flex align-items-center">
             <nav className="navbar navbar-expand p-0 flex-grow-1">
               <div className="navbar-nav align-items-center justify-content-between w-100">
@@ -277,23 +437,8 @@ function App() {
           </footer>
         </Tab.Container>
       </div>
-      <Modal
-        show={showQrCodeModal}
-        fullscreen={"md-down"}
-        onHide={() => {
-          setShowQrCodeModal(false);
-          setInputValue("");
-        }}
-      >
-        <Modal.Header closeButton>
-          <Modal.Title>Sending ...</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <QRCodeSVG width="100%" height="100%" size={400} value={magicLink} />
-        </Modal.Body>
-      </Modal>
 
-      <Modal show={magicId} fullscreen={"md-down"}>
+      <Modal show={checkAddress} fullscreen={"md-down"}>
         <Modal.Header closeButton>
           <Modal.Title>Sending...</Modal.Title>
         </Modal.Header>

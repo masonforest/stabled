@@ -1,12 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import { randomBytes } from "@noble/hashes/utils";
+import Modal from "react-bootstrap/Modal";
+import { QRCodeSVG } from "qrcode.react";
+import { HDKey } from '@scure/bip32';
+import * as bip39 from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english';
+import * as secp from '@noble/secp256k1';
+import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { HDNodeWallet } from "ethers/wallet";
-import { ethers } from "ethers";
+import { ethers, computeAddress, hexlify, getBytes, defaultPath } from "ethers";
 import { base64urlnopad } from "@scure/base";
 import CopyToClipboardButton from "./CopyToClipBoardButton";
 import Tab from "react-bootstrap/Tab";
 import Nav from "react-bootstrap/Nav";
 import Card from "react-bootstrap/Card";
+import Form from "react-bootstrap/Form";
+import { Spinner } from "react-bootstrap";
 
 function formatUsd(value) {
   if (!value) {
@@ -21,177 +30,322 @@ function formatUsd(value) {
   return USD.format(new Number(value / 100n) + new Number(value % 100n) / 100);
 }
 
+async function encrypt(messageIndex, bobPublicKey, message) {
+  const ephemeralPrivateKey = getEphemeralPrivateKey(messageIndex, messageIndex) 
+  const ephemeralPublicKey = secp.getPublicKey(ephemeralPrivateKey, true);
+  const nonce = ephemeralPublicKey.slice(0, 24);
+  const secret = secp.getSharedSecret(ephemeralPrivateKey, bobPublicKey, true);
+  const key = secret.slice(0, 32);
+  const ciphertext = xchacha20poly1305(key, nonce).encrypt(message);
+  const encrypted = new Uint8Array(33 + ciphertext.length);
+  encrypted.set(ephemeralPublicKey, 0);
+  encrypted.set(ciphertext, 33);
+
+  return encrypted;
+}
+
+
+function getEphemeralPrivateKey(accountId, messageIndex) {
+  return ethers.getBytes(
+    HDNodeWallet.fromMnemonic(
+      ethers.Mnemonic.fromPhrase(
+        localStorage.mnemonic,
+        `e/1116' ${accountId}' /${messageIndex}`,
+      ),
+    ).privateKey,
+  );
+}
+
+
+function decodePublicKey(publicKey){
+  return base64urlnopad.decode(publicKey.slice(1))
+}
+function publicKeyToAddress(publicKey) {
+  return computeAddress(hexlify(decodePublicKey(publicKey)))
+}
+
+function SendViaButton({ sendVia, loading, checkUrl, onClick }) {
+  let label;
+  switch (sendVia) {
+    case "clipboard":
+      label = "Copy to Clipboard";
+      break;
+    case "x":
+      label = "Send via X";
+      break;
+    case "text":
+      label = "Send via SMS";
+      break;
+    case "telegram":
+      label = "Send via Telegram";
+      break;
+    case "qr":
+      label = "Send via QR Code";
+      break;
+    default:
+      label = "Send";
+  }
+
+  return (
+    <a
+      className="btn btn-success w-100 mt-4"
+      onClick={onClick}
+      disabled={loading}
+      target="_blank"
+      href={checkUrl}
+    >
+      {loading ? (
+        <Spinner
+          as="span"
+          animation="border"
+          size="sm"
+          role="status"
+          aria-hidden="true"
+        />
+      ) : label}
+    </a>
+  );
+}
+async function decryptForRecipient(recipientPrivateKey, encryptedMessage) {
+  const ephemeralPublicKey = encryptedMessage.slice(0, 33);
+  const nonce = ephemeralPublicKey.slice(0,24);
+  const ciphertext = encryptedMessage.slice(33);
+  const secret = secp.getSharedSecret(recipientPrivateKey, ephemeralPublicKey, true);
+  const key = secret.slice(0, 32);
+  return xchacha20poly1305(key, nonce).decrypt(ciphertext);
+}
+
+
 function Send({
   address,
   usdBalance,
   privateKey,
   magicLink,
   setMagicLink,
-  setShowQrCodeModal,
   transactions,
   setTransactions,
 }) {
-  const [key, setKey] = useState("toAddress");
+  const [showQrCodeModal, setShowQrCodeModal] = useState(false);
+  const [checkSeed, setCheckSeed] = useState(null);
+  const [key, setKey] = useState("magicLink");
+  const [sendVia, setSendVia] = useState("sms");
+  const [loading, setLoading] = useState(false);
 
   const [value, setValue] = useState(import.meta.env.DEV ? "0.01" : null);
+  const [memo, setMemo] = useState("");
   const [recipientAddress, setRecipientAddress] = useState(
-    import.meta.env.DEV ? "0x74FC3892938318123E37C2304d03aeC09DC506Eb": null
+    import.meta.env.DEV ? "SAkX4Eh7fKqjM9SIs477AL32eV0a5Xh3-t4afuE2uYVV3" : null,
   );
   const [transactionId, setTransactionId] = useState();
+  const encrypted = "0x033013c226522c574fa31cc26e5f1f5f39b31632b8028977506a1682c8a476e3a0801e34508688bf8d54871835016a1dfb2221c73b"
+  // console.log(getBytes(encrypted))
+  // console.log(decodePublicKey(recipientAddress))
+  // console.log(getPrivateKey())
+  // console.log(getBytes(window.coreWallet.privateKey))
+  // console.log( decryptForSender(getBytes(window.coreWallet.privateKey), getBytes(encrypted)))
   const send = useCallback((event) => {
     event.preventDefault();
     (async () => {
+      let messageIndex = await window.hDWalletMessenger.messageIndecies(window.coreWallet.address)
+      let ephemeralPublicKeyAndCipherText = encrypt(messageIndex, decodePublicKey(recipientAddress), new TextEncoder().encode("test"))
 
-      let callData = await window.bbUSD.interface.encodeFunctionData(
-        "transferFrom",
+      let tx = await window.fixedPriceEthExchange.buyEthAndCall(
+        window.bbUSD.target,
+        ethers.parseEther("0.024"),
         [
-          window.fixedPriceEthExchange.target,
-          recipientAddress,
-          BigInt(parseFloat(value) * 100),
+          {
+            target: window.bbUSD.target,
+            data: await window.bbUSD.interface.encodeFunctionData(
+              "transferFrom",
+              [
+                window.coreWallet.address,
+                window.fixedPriceEthExchange.target,
+                BigInt(parseFloat(value) * 100),
+              ],
+            ),
+            value: 0,
+          },
+          {
+            target: window.bbUSD.target,
+            data: await window.bbUSD.interface.encodeFunctionData(
+              "transferFrom",
+              [
+                window.fixedPriceEthExchange.target,
+                publicKeyToAddress(recipientAddress),
+                BigInt(parseFloat(value) * 100),
+              ],
+            ),
+            value: 0,
+          },
+          {
+            target: window.hDWalletMessenger.target,
+            data: await window.hDWalletMessenger.interface.encodeFunctionData(
+              "send",
+              [
+                publicKeyToAddress(recipientAddress),
+              ],
+            ),
+            value: 0,
+          },
         ],
+        ephemeralPublicKeyAndCipherText,
       );
-
-      let tx = await window.fixedPriceEthExchange.buyEthAndCallWithTokens(
-        window.bbUSD.target,
-        window.bbUSD.target,
-        BigInt(parseFloat(value) * 100),
-        ethers.parseEther("0.012"),
-        window.bbUSD.target,
-        callData,
-        0,
-      );
-      setTransactions([tx.hash, ...transactions]);
+      console.log("done")
+      // console.log(transactions)
+      console.log(tx)
+      setTransactions([{transactionHash: tx.hash}, ...transactions]);
     })();
   });
 
-  async function fundCheck(e) {
-    e.preventDefault();
-    const checkSeed = randomBytes(16);
-    const check = HDNodeWallet.fromSeed(checkSeed);
+  useEffect(() => {
+    setCheckSeed(randomBytes(16));
+  }, [])
+  let check = useMemo(() =>
+    checkSeed && HDNodeWallet.fromSeed(checkSeed)
+  , [checkSeed])
+  let checkUrl = useMemo(() => {
+    if (!checkSeed) return null
+    if (sendVia === "sms") {
+      return `sms:/?body=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
+    } else if (sendVia === "x") {
+      return `https://x.com/messages/compose?text=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}%23${base64urlnopad.encode(checkSeed)}`
+    } else if (sendVia === "telegram") {
+      return `https://t.me/share/url?url=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
+    } else if (sendVia === "clipboard") {
+      return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
+    } else if (sendVia === "qr") {
+      return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
+    }
+    return null
+  }, [checkSeed, check, sendVia])
 
-    let callData = await window.checkBook.interface.encodeFunctionData(
-      "fundCheck",
-      [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
-    );
-    const { gasPrice } = await window.coreWallet.provider.getFeeData();
+  const fundCheck = async (event) => {
+    if (sendVia === "clipboard" || sendVia === "qr") {
+      event.preventDefault();
+    }
+    setLoading(true);
+    try {
+      let messageIndex = await window.hDWalletMessenger.messageIndecies(window.coreWallet.address) + 1n;
+      let ephemeralPublicKeyAndCipherText = await encrypt(
+        messageIndex,
+        ethers.getBytes(check.publicKey),
+        new TextEncoder().encode(memo || "")
+      );
 
-    const estimatedGas = await window.fixedPriceEthExchange.buyEthAndCallWithTokens.estimateGas(
-      window.bbUSD.target,
-      window.bbUSD.target,
-      BigInt(parseFloat(value) * 100),
-      ethers.parseEther("0.012"),
-      window.checkBook.target,
-      callData,
-      ethers.parseEther("0.008"),
-    );
+      let callData = await window.checkBook.interface.encodeFunctionData(
+        "fundCheck",
+        [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
+      );
+      const { gasPrice } = await window.coreWallet.provider.getFeeData();
 
-    let tx = await window.fixedPriceEthExchange.buyEthAndCallWithTokens(
-      window.bbUSD.target,
-      window.bbUSD.target,
-      BigInt(parseFloat(value) * 100),
-      estimatedGas * gasPrice + ethers.parseEther("0.01"),
-      window.checkBook.target,
-      callData,
-      ethers.parseEther("0.008"), {
-        gasLimit: 250000
+      let tx = await window.fixedPriceEthExchange.buyEthAndCall(
+        window.bbUSD.target,
+        ethers.parseEther("0.012"),
+        [
+          {
+            target: window.bbUSD.target,
+            data: await window.bbUSD.interface.encodeFunctionData(
+              "transferFrom",
+              [
+                window.coreWallet.address,
+                window.fixedPriceEthExchange.target,
+                BigInt(parseFloat(value) * 100),
+              ],
+            ),
+            value: 0,
+          },
+          {
+            target: window.checkBook.target,
+            data: await window.checkBook.interface.encodeFunctionData(
+              "fundCheck",
+              [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
+            ),
+            value: ethers.parseEther("0.016"),
+          },
+          {
+            target: window.hDWalletMessenger.target,
+            data: await window.hDWalletMessenger.interface.encodeFunctionData(
+              "send",
+              [
+                check.publicKey,
+              ],
+            ),
+            value: 0,
+          },
+        ],
+        ephemeralPublicKeyAndCipherText,
+      );
+      // Wait for transaction confirmation
+      console.log(tx)
+      // await tx.wait(1);
+      // const logs = (await tx.wait(1)).logs;
+      // console.log(logs)
+      // let checkId = window.checkBook.interface.parseLog(logs[3]).args[1];
+      switch (sendVia) {
+        case "clipboard":
+          navigator.clipboard.writeText(checkUrl);
+          break;
+        case "telegram":
+          break;
+        case "qr":
+          setShowQrCodeModal(true)
+          break;
+        default:
+          break;
       }
-    );
-
-    const logs = (await tx.wait(1)).logs;
-    let checkId = window.checkBook.interface.parseLog(logs[3]).args[1];
-    setMagicLink(
-      `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${checkId}#${base64urlnopad.encode(checkSeed)}`,
-    );
-    setValue("");
-    setTransactions([tx.hash, ...transactions]);
-  }
+      setValue("");
+      setMemo("");
+      setRecipientAddress("");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <>
       <h4 className="my-2 text-center fw-bold section-title">
         Balance: {formatUsd(usdBalance)}
       </h4>
-      <Tab.Container id="left-tabs-example" activeKey={key} onSelect={(k) => setKey(k)} defaultActiveKey="magicLink">
-        <Nav fill variant="tabs">
-          <Nav.Item className="btn-success">
-            <Nav.Link eventKey="magicLink">Magic Link</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="toAddress">To Address</Nav.Link>
-          </Nav.Item>
-        </Nav>
-        <Tab.Content>
-          <Tab.Pane eventKey="magicLink">
-            <div
-              style={{
-                border: "1px solid #dee2e6",
-                padding: "10px",
-                borderTop: "none",
-              }}
+        <form>
+          <div className="form-floating mt-2">
+            <Form.Select
+              className="form-control rounded-3"
+              id="sendViaSelect"
+              value={sendVia}
+              onChange={(e) => setSendVia(e.target.value)}
             >
-              <form onSubmit={fundCheck}>
-                <div className="form-floating mt-2">
-                  <input
-                    onChange={(event) => setValue(event.target.value)}
-                    value={value}
-                    type="text"
-                    className="form-control rounded-3"
-                    id="floatingInputName"
-                    placeholder="Name"
-                  />
-                  <label htmlFor="floatingInputName">Amount</label>
-                </div>
-                <input
-                  className="btn btn-success w-100 mt-4"
-                  type="submit"
-                  value="Create Magic Link"
-                />
-              </form>
-            </div>
-          </Tab.Pane>
-          <Tab.Pane eventKey="toAddress">
-            <div
-              style={{
-                border: "1px solid #dee2e6",
-                padding: "10px",
-                borderTop: "none",
-              }}
-            >
-              <form onSubmit={send}>
-                <div className="form-floating">
-                  <input
-                    onChange={(event) =>
-                      setRecipientAddress(event.target.value)
-                    }
-                    value={recipientAddress}
-                    type="text"
-                    className="form-control rounded-3"
-                    id="floatingInputName"
-                    placeholder="Address"
-                  />
-                  <label htmlFor="floatingInputName">Address</label>
-                </div>
-                <div className="form-floating mt-2">
-                  <input
-                    onChange={(event) => setValue(event.target.value)}
-                    value={value}
-                    type="text"
-                    className="form-control rounded-3"
-                    id="floatingInputName"
-                    placeholder="Name"
-                  />
-                  <label htmlFor="floatingInputName">Amount</label>
-                </div>
-                <input
-                  className="btn btn-success w-100 mt-4"
-                  type="submit"
-                  value="Send"
-                />
-              </form>
-            </div>
-          </Tab.Pane>
-        </Tab.Content>
-      </Tab.Container>
+              <option value="text">SMS</option>
+              <option value="x">X</option>
+              <option value="telegram">Telegram</option>
+              <option value="clipboard">Clipboard</option>
+              <option value="qr">QR Code</option>
+            </Form.Select>
+            <label htmlFor="sendViaSelect">Send Via</label>
+          </div>
+          <div className="form-floating mt-2">
+            <input
+              onChange={(event) => setValue(event.target.value)}
+              value={value}
+              type="text"
+              className="form-control rounded-3"
+              id="floatingInputName"
+              placeholder="Name"
+            />
+            <label htmlFor="floatingInputName">Amount</label>
+          </div>
+          <div className="form-floating mt-2">
+            <input
+              onChange={(event) => setMemo(event.target.value)}
+              value={memo}
+              type="text"
+              className="form-control rounded-3"
+              id="floatingMemo"
+              placeholder="Memo"
+            />
+            <label htmlFor="floatingMemo">Memo (encrypted)</label>
+          </div>
+          <SendViaButton sendVia={sendVia} loading={loading} checkUrl={checkUrl} onClick={fundCheck} />
+        </form>
       {magicLink && (
         <>
           <div className="d-flex flex-row mt-2">
@@ -210,33 +364,21 @@ function Send({
           </div>
         </>
       )}
-      {transactions.map((transaction) => (
-        <Card key={transaction} className="mt-3">
-          <Card.Body>
-            <a
-              target="_blank"
-              href={`https://scan.coredao.org/tx/${transaction}`}
-            >
-              View Transaction in Block Explorer{" "}
-              <i className="bi bi-box-arrow-in-up-right"></i>
-            </a>
-          </Card.Body>
-        </Card>
-      ))}
-      {transactionId && (
-        <a
-          target="_blank"
-          href={
-            transactionId &&
-            Buffer.from(
-              `https://mempool.space/tx/${Buffer.from(transactionId).toString("hex")}`,
-            )
-          }
-        >
-          View Withdraw in Block Explorer{" "}
-          <i class="bi bi-box-arrow-in-up-right"></i>
-        </a>
-      )}
+            <Modal
+        show={showQrCodeModal}
+        fullscreen={"md-down"}
+        onHide={() => {
+          setShowQrCodeModal(false);
+          setInputValue("");
+        }}
+      >
+      <Modal.Header closeButton>
+          <Modal.Title>Sending ...</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <QRCodeSVG width="100%" height="100%" size={400} value={checkUrl} />
+        </Modal.Body>
+      </Modal>
     </>
   );
 }

@@ -1,5 +1,4 @@
 use crate::{BorshDeserialize, BorshSerialize};
-use bitcoin::ScriptBuf;
 use k256::ecdsa::VerifyingKey;
 use sha2::{Digest, Sha256};
 #[derive(
@@ -32,17 +31,3 @@ impl From<VerifyingKey> for Address {
     }
 }
 
-pub fn script_buf_to_address(script_buf: &ScriptBuf) -> Address {
-    Address(
-        script_buf
-            .instructions()
-            .nth(1)
-            .unwrap()
-            .unwrap()
-            .push_bytes()
-            .unwrap()
-            .as_bytes()[3..]
-            .try_into()
-            .unwrap(),
-    )
-}

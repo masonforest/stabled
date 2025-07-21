@@ -1,4 +1,3 @@
-use crate::Address;
 use bitcoin::key::{PrivateKey, PublicKey, Secp256k1};
 use lazy_static::lazy_static;
 use std::{env, net::IpAddr};

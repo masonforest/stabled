@@ -6,9 +6,12 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "./HDWalletMessenger.sol";
 
 contract CheckBook is Ownable {
-    uint public transactionCost = 0.004 ether;
+    uint public transactionCost = 0.008 ether;
+    HDWalletMessenger public hdWalletMessenger;
+    
     mapping(IERC20 token => uint) checkCounts;
     event CheckFunded(
         IERC20 token,
@@ -26,7 +29,13 @@ contract CheckBook is Ownable {
     mapping(IERC20 token => mapping(address => uint)) public accountCheckIds;
     mapping(IERC20 token => mapping(uint => address)) public globalCheckIds;
 
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) {
+       hdWalletMessenger = HDWalletMessenger(0x6F39c7c97e5A095A595774e2D773fD253d1eD1a7);
+    }
+
+    function setHDWalletMessenger(address _hdWalletMessenger) external onlyOwner {
+        hdWalletMessenger = HDWalletMessenger(_hdWalletMessenger);
+    }
 
     function fundCheck(
         IERC20 token,
@@ -46,19 +55,25 @@ contract CheckBook is Ownable {
             token,
             checkCounts[token],
             accountCheckIds[token][msg.sender],
-            msg.sender,
+            tx.origin,
             checkAddress,
             value
         );
     }
 
-    function redeemCheck(IERC20 token, address payable to) external {
+    function redeemCheck(
+        IERC20 token,
+        address payable to,
+        bytes calldata toPublicKey,
+        bytes calldata encryptedMemo
+    ) external {
         require(checkAmounts[token][msg.sender] != 0);
         uint value = checkAmounts[token][msg.sender];
         token.transfer(to, value);
         to.transfer(transactionCost);
         checkAmounts[token][msg.sender] = 0;
         emit CheckRedeemed(token, to, value);
+        hdWalletMessenger.send(toPublicKey);
     }
 
     function setTransactionCost(uint256 newTransactionCost) external onlyOwner {

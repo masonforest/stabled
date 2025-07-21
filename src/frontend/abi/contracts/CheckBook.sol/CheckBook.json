@@ -234,6 +234,19 @@
   },
   {
     "inputs": [],
+    "name": "hdWalletMessenger",
+    "outputs": [
+      {
+        "internalType": "contract HDWalletMessenger",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "owner",
     "outputs": [
       {
@@ -280,6 +293,16 @@
         "internalType": "address payable",
         "name": "to",
         "type": "address"
+      },
+      {
+        "internalType": "bytes",
+        "name": "toPublicKey",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bytes",
+        "name": "encryptedMemo",
+        "type": "bytes"
       }
     ],
     "name": "redeemCheck",
@@ -290,6 +313,19 @@
   {
     "inputs": [],
     "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_hdWalletMessenger",
+        "type": "address"
+      }
+    ],
+    "name": "setHDWalletMessenger",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

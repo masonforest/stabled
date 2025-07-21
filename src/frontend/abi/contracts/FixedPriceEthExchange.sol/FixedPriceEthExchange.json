@@ -53,49 +53,40 @@
         "type": "address"
       },
       {
-        "internalType": "contract IERC20",
-        "name": "tokenToTransfer",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "tokenAmount",
-        "type": "uint256"
-      },
-      {
         "internalType": "uint256",
         "name": "ethAmount",
         "type": "uint256"
       },
       {
-        "internalType": "address",
-        "name": "contractAddress",
-        "type": "address"
+        "components": [
+          {
+            "internalType": "address",
+            "name": "target",
+            "type": "address"
+          },
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          },
+          {
+            "internalType": "uint256",
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct FixedPriceEthExchange.Call[]",
+        "name": "calls",
+        "type": "tuple[]"
       },
       {
         "internalType": "bytes",
-        "name": "callData",
-        "type": "bytes"
-      },
-      {
-        "internalType": "uint256",
-        "name": "callValue",
-        "type": "uint256"
-      }
-    ],
-    "name": "buyEthAndCallWithTokens",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      },
-      {
-        "internalType": "bytes",
-        "name": "",
+        "name": "encryptedMemo",
         "type": "bytes"
       }
     ],
+    "name": "buyEthAndCall",
+    "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },

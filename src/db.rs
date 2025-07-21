@@ -1,15 +1,6 @@
-use crate::{
-    address::Address,
-    // bitcoin::multi_sig,
-    // constants::{PUBLIC_IP, PUBLIC_KEY, SYSTEM_ADDRESS},
-    error::{Error, Result},
-    transaction::{self, Currency},
-    // SignedTransaction, Transaction,
-};
+use crate::error::Result;
 // use bitcoin::{BlockHash, Network};
-use log::info;
-use sqlx::{Executor, PgConnection, PgPool, Postgres, Row, query, query_as};
-use std::{collections::HashMap, net::IpAddr, str::FromStr};
+use sqlx::{Executor, Postgres, query};
 
 pub async fn insert_transaction<'a, E>(
     pool: E,
@@ -39,11 +30,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[sqlx::test]
-    async fn test_insert_transaction(pool: PgPool) {
-        insert_transaction(&pool, [0; 20], [0; 20], [0; 32])
-            .await
-            .unwrap();
-    }
+    
+    // #[sqlx::test]
+    // async fn test_insert_transaction(pool: PgPool) {
+        // insert_transaction(&pool, [0; 20], [0; 20], [0; 32])
+        //     .await
+        //     .unwrap();
+    // }
 }

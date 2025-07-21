@@ -7,25 +7,26 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract FixedPriceEthExchange is Ownable {
     mapping(IERC20 token => uint) public prices;
 
+    struct Call {
+        address target;
+        bytes data;
+        uint256 value; 
+     }
+
     constructor() Ownable(msg.sender) {}
 
-    function buyEthAndCallWithTokens(
+    function buyEthAndCall(
         IERC20 token,
-        IERC20 tokenToTransfer,
-        uint256 tokenAmount,
         uint256 ethAmount,
-        address contractAddress,
-        bytes calldata callData,
-        uint256 callValue
-    ) external returns (bool, bytes memory) {
-        tokenToTransfer.transferFrom(
-            msg.sender,
-            address(this),
-            tokenAmount
-        );
-        chargeToken(token, ethAmount + callValue);
+        Call[] calldata calls,
+        bytes calldata encryptedMemo
+    ) external {
+        chargeToken(token, ethAmount + calls[0].value);
         payable(msg.sender).transfer(ethAmount);
-        return contractAddress.call{value: callValue}(callData);
+ 
+        for (uint i = 0; i < calls.length; i++) {
+            calls[i].target.call{value: calls[i].value}(calls[i].data);
+        }
     }
 
     function chargeToken(IERC20 token, uint256 ethAmount) internal {

@@ -17,6 +17,28 @@ const isMagicLink = Number.isInteger(checkId);
 const checkEntropy = window.location.hash.slice(1);
 
 localStorage.mnemonic ||= ethers.Wallet.createRandom().mnemonic.phrase;
+
+function beginSliding(e) {
+  slider.onpointermove = slide;
+  slider.setPointerCapture(e.pointerId);
+}
+
+function stopSliding(e) {
+  slider.onpointermove = null;
+  slider.releasePointerCapture(e.pointerId);
+}
+
+function slide(e) {
+  slider.style.transform = `translate(${e.clientX - 70}px)`;
+}
+
+// const slider = document.getElementById("slider");
+
+// slider.onpointerdown = (e) => {
+    
+//     console.log("down")
+// };
+// slider.onpointerup = () => console.log("up");
 // const checkEntropy = window.location.hash.slice(1);
 // function loadWallet() {
 //   document.getElementById("wallet_buttons").style.display = "none";
