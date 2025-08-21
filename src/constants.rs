@@ -1,3 +1,4 @@
+use alloy::primitives::{Address, address};
 use bitcoin::key::{PrivateKey, PublicKey, Secp256k1};
 use lazy_static::lazy_static;
 use std::{env, net::IpAddr};
@@ -41,4 +42,8 @@ lazy_static! {
             .clone()))
         .unwrap_or(vec![]);
     pub static ref COIN_MARKET_CAP_KEY: String = env::var("COIN_MARKET_CAP_KEY").unwrap();
+    pub static ref CHECKBOOK_ADDRESS: Address = address!("0x5c541Da45961fdC5dC8e999a08E256011447e226");
+    pub static ref WSS_URL: String = env::var("WSS_URL").unwrap();
+    pub static ref RPC_URL: String = env::var("RPC_URL").unwrap();
+
 }

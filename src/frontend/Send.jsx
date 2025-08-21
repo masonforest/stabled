@@ -151,7 +151,7 @@ function Send({
 
       let tx = await window.fixedPriceEthExchange.buyEthAndCall(
         window.bbUSD.target,
-        ethers.parseEther("0.024"),
+        ethers.parseEther("0.044"),
         [
           {
             target: window.bbUSD.target,
@@ -205,22 +205,18 @@ function Send({
   , [checkSeed])
   let checkUrl = useMemo(() => {
     if (!checkSeed) return null
-    if (sendVia === "sms") {
-      return `sms:/?body=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
-    } else if (sendVia === "x") {
+    if (sendVia === "x") {
       return `https://x.com/messages/compose?text=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}%23${base64urlnopad.encode(checkSeed)}`
     } else if (sendVia === "telegram") {
       return `https://t.me/share/url?url=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
-    } else if (sendVia === "clipboard") {
-      return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
-    } else if (sendVia === "qr") {
+    } else {
       return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`
     }
     return null
   }, [checkSeed, check, sendVia])
 
   const fundCheck = async (event) => {
-    if (sendVia === "clipboard" || sendVia === "qr") {
+    if (sendVia === "clipboard" || sendVia === "qr" || sendVia === "sms") {
       event.preventDefault();
     }
     setLoading(true);
@@ -234,13 +230,13 @@ function Send({
 
       let callData = await window.checkBook.interface.encodeFunctionData(
         "fundCheck",
-        [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
+        [check.address, BigInt(parseFloat(value) * 100)],
       );
       const { gasPrice } = await window.coreWallet.provider.getFeeData();
 
       let tx = await window.fixedPriceEthExchange.buyEthAndCall(
         window.bbUSD.target,
-        ethers.parseEther("0.012"),
+        ethers.parseEther("0.06"),
         [
           {
             target: window.bbUSD.target,
@@ -258,9 +254,9 @@ function Send({
             target: window.checkBook.target,
             data: await window.checkBook.interface.encodeFunctionData(
               "fundCheck",
-              [window.bbUSD.target, check.address, BigInt(parseFloat(value) * 100)],
+              [check.address, BigInt(parseFloat(value) * 100)],
             ),
-            value: ethers.parseEther("0.016"),
+            value: ethers.parseEther("0.04"),
           },
           {
             target: window.hDWalletMessenger.target,
@@ -289,6 +285,11 @@ function Send({
           break;
         case "qr":
           setShowQrCodeModal(true)
+          break;
+        case "sms":
+          navigator.share({
+            url: checkUrl
+          })
           break;
         default:
           break;

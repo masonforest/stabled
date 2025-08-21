@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -10,7 +10,7 @@ import "./HDWalletMessenger.sol";
 import "hardhat/console.sol";
 
 contract CheckBook is Ownable {
-    uint public transactionCost = 0.02 ether;
+    uint public transactionCost = 0.01 ether;
     HDWalletMessenger public hdWalletMessenger;
     IERC20 public token;
     
@@ -63,7 +63,6 @@ contract CheckBook is Ownable {
             from: tx.origin
         });
 
-
         emit Feed(tx.origin);
         emit CheckFunded(
             tx.origin,
@@ -77,7 +76,6 @@ contract CheckBook is Ownable {
         bytes calldata toPublicKey,
         bytes calldata encryptedMemo
     ) external {
-        encryptedMemo;
         require(checks[msg.sender].value != 0);
         uint value = checks[msg.sender].value;
         token.transfer(to, value);

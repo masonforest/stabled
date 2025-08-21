@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.28;
 
 contract HDWalletMessenger {
     mapping(address => uint) public messageIndecies;
@@ -25,9 +25,8 @@ contract HDWalletMessenger {
     
     function sendWithCallData(
         bytes calldata toPublicKey,
-        bytes calldata _ephemeralPublicKeyAndMessage
+        bytes calldata ephemeralPublicKeyAndMessage
     ) external {
         send(toPublicKey);
-        _ephemeralPublicKeyAndMessage;
     }
 }
