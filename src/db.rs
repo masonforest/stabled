@@ -30,11 +30,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    
+
     // #[sqlx::test]
     // async fn test_insert_transaction(pool: PgPool) {
-        // insert_transaction(&pool, [0; 20], [0; 20], [0; 32])
-        //     .await
-        //     .unwrap();
+    // insert_transaction(&pool, [0; 20], [0; 20], [0; 32])
+    //     .await
+    //     .unwrap();
     // }
 }

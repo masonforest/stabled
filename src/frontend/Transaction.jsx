@@ -64,10 +64,10 @@ function getEphemeralPrivateKey(accountId, messageIndex) {
 
 
 function message (transaction) {
-  // console.log(transaction)
+  console.log(transaction)
   switch(transaction.action) {
     case 'CheckFunded':
-      return <><div>You sent <span style={{color: "red"}}>{formatUsd(BigInt(transaction.amount))}</span></div>
+      return <><div>You sent <span style={{color: "red"}}>{formatUsd(BigInt(transaction.amount))}</span> {transaction.redeemed ? null :<span style={{color: "grey"}}>(Pending)</span>}</div>
       {decryptForSender(transaction.messageIndex, ethers.getBytes(transaction.toPublicKey), ethers.getBytes(transaction.encryptedMemo))}
       </>
     case 'CheckRedeemed':
@@ -82,7 +82,7 @@ function message (transaction) {
 
 function Transaction({ transaction }) {
   return (
-    <Card key={transaction.messageIndex} className="mt-3">
+    <Card key={transaction.transactionHash+transaction.encryptedMemo} className="mt-3">
       <Card.Body className="d-flex flex-column p-3"> {/* Added padding */}
         <div className="d-flex justify-content-between align-items-start gap-3"> {/* Added gap and align-items-start */}
           <div className="flex-grow-1"> {/* Allow message to take available space */}

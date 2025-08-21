@@ -2,7 +2,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::Deserialize;
 use std::str::FromStr;
 
-
 #[derive(
     Hash,
     BorshSerialize,

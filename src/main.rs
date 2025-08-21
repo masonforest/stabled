@@ -2,17 +2,16 @@ use axum::{Router, http::uri::Uri, response::Redirect, routing::get};
 use axum_extra::extract::Host;
 use dotenv::dotenv;
 use rustls_acme::{AcmeConfig, caches::DirCache};
-use stable::{
-    constants::{ENV, Env, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT},
-};
+use stable::constants::{ENV, Env, LETS_ENCRYPT_DOMAINS, LETS_ENCRYPT_EMAILS, PORT};
 use std::{net::Ipv6Addr, path::PathBuf};
 use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("Starting server");
     rustls::crypto::ring::default_provider()
-    .install_default()
-    .expect("Failed to install rustls crypto provider");
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
     dotenv().ok();
     env_logger::init();
 

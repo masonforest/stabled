@@ -32,9 +32,6 @@ import { HDKey } from "@scure/bip32";
 import { xchacha20poly1305 } from "@noble/ciphers/chacha";
 import { utf8ToBytes } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/webcrypto";
-// import { Transaction } from "bitcoinjs-lib";
-// import Cookies from 'universal-cookie';
-// console.log(ethers)
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
   hmac(sha256, k, secp256k1.etc.concatBytes(...m));
 const mnemonic2 =
@@ -80,8 +77,6 @@ function decryptForRecipient(privateKey, encryptedMessage) {
   const ciphertext = encryptedMessage.slice(33);
   const secret = secp.getSharedSecret(privateKey, ephemeralPublicKey, true);
   const key = secret.slice(0, 32);
-  console.log("decoded")
-  console.log(xchacha20poly1305(key, nonce).decrypt(ciphertext))
   return new TextDecoder().decode(xchacha20poly1305(key, nonce).decrypt(ciphertext));
 }
 
@@ -102,7 +97,19 @@ function App() {
   // const [transactions, setTransactions] = useState([
   //   // "0x409e28d995478f3f5236756451d77a1b8930e05d299e11cd632ea1721ab49451",
   // ]);
-  const [transactions, addTransaction] = useReducer((state, action) => [action,...state], [])
+  const [transactions, addTransaction] = useReducer((state, action) => {
+  
+    if (action.action === 'CheckRedeemed' && action.from === window.coreWallet.address.toLowerCase()) {
+      return state.map(existingAction => 
+          existingAction.action === 'CheckFunded' && 
+          existingAction.checkAddress === action.checkAddress
+            ? {...existingAction, redeemed: true}
+            : existingAction
+        )
+    }
+    return [action,...state]
+  }
+  , [])
   const [checkBalance, setCheckBalance] = useState();
   const [checkMemo, setCheckMemo] = useState();
   const [magicLink, setMagicLink] = useState();
@@ -116,7 +123,7 @@ function App() {
   const esRef = useRef(null);
 
   useEffect(() => {
-    const coreProvider = new ethers.JsonRpcProvider("https://lb.drpc.org/core/AnBEZF95LU2KkyY4vqliaV7LHpqrXcIR8JkHrqRhf0fE");
+    const coreProvider = new ethers.JsonRpcProvider("https://rpc.coredao.org");
     window.coreWallet = ethers.Wallet.fromPhrase(
       localStorage.mnemonic,
       coreProvider,
@@ -166,7 +173,7 @@ function App() {
         },
       );
       esRef.current.onmessage = async ({ data }) => {
-        // console.log(JSON.parse(data))
+        console.log(JSON.parse(data))
         // console.log(transactions.length)
         addTransaction(
           JSON.parse(data),
@@ -178,7 +185,6 @@ function App() {
     };
     esRef.current.onerror = (e, x) => console.log(e);
     return () => {
-      console.log("closing")
       esRef.current && esRef.current.close();
       esRef.current = null;
     };
@@ -192,7 +198,7 @@ function App() {
       );
 
       window.checkBook = new ethers.Contract(
-        "0x168b0e3a5aD6343Ea1BAc552F72D8C7a88Cf65D6",
+        "0x5c541Da45961fdC5dC8e999a08E256011447e226",
         CheckBookAbi,
         window.coreWallet,
       );
@@ -216,31 +222,27 @@ function App() {
         const checkSeed = base64urlnopad.decode(checkEntropy);
         const check = HDNodeWallet.fromSeed(checkSeed);
         const coreProvider = new ethers.JsonRpcProvider(
-          "https://rpc-core.icecreamswap.com",
+          "https://rpc.coredao.org",
         );
         window.checkWallet = check.connect(coreProvider);
         setCheckBalance(
-          await window.checkBook.checkAmounts(
-            window.bbUSD.target,
+          (await window.checkBook.checks(
             check.address,
-          ),
+          )).value,
         );
         const log = await window.coreWallet.provider.getLogs({
                       address: window.checkBook.target,
                       fromBlock: 0,
                       topics: [
                         window.checkBook.interface.getEvent("CheckFunded").topicHash,
-                        null,
                         ethers.zeroPadValue(
                           check.address.toLowerCase(),
                           32,
                         ),
                       ],
                     });
-                    console.log(log)
             const tx = await window.coreWallet.provider.getTransaction(log[0].transactionHash)
             const decodedData = window.fixedPriceEthExchange.interface.decodeFunctionData("buyEthAndCall", tx.data);
-            console.log(await decryptForRecipient(ethers.getBytes(check.privateKey), ethers.getBytes(decodedData[3])))
             setCheckMemo(
               await decryptForRecipient(ethers.getBytes(check.privateKey), ethers.getBytes(decodedData[3]))
             );
@@ -295,7 +297,6 @@ function App() {
     fetchData();
   }, []);
 
-  // console.log(transactions.map((t) => t.transactionHash))
 
   const redeemCheck = useCallback(
     (event) => {
@@ -306,32 +307,20 @@ function App() {
         //   setCheckAddress()
         // })
 
-        const checkAmount = await window.checkBook.checkAmounts(
-          bbUSD.target,
+        const checkAmount = (await window.checkBook.checks(
           window.checkWallet.address,
-        );
+        )).value;
         setUsdBalance(usdBalance + checkAmount);
         setCheckAddress();
         history.pushState({}, "", `/`);
-        console.log("before")
-        console.log(checkMemo)
         let ephemeralPublicKeyAndCipherText = await encrypt(
           ethers.getBytes(window.checkWallet.privateKey),
           ethers.getBytes(window.coreWallet.publicKey),
           new TextEncoder().encode(checkMemo)
         );
-        console.log(window.coreWallet.privateKey)
-        console.log(Buffer.from(ephemeralPublicKeyAndCipherText).toString("hex"))
-
-        console.log(decryptForRecipient(
-          ethers.getBytes(window.coreWallet.privateKey),
-          ephemeralPublicKeyAndCipherText)
-        )
-        console.log("after")
         let tx = await window.checkBook
           .connect(window.checkWallet)
           .redeemCheck(
-            bbUSD.target,
             window.coreWallet.address,
             window.coreWallet.publicKey,
             ephemeralPublicKeyAndCipherText

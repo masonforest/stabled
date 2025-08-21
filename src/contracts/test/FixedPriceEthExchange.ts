@@ -1,20 +1,27 @@
-const { UInt32Schema } = require("bitcoinjs-lib/src/types");
-const { expect } = require("chai");
-const { formatEther, HDNodeWallet, UndecodedEventLog } = require("ethers");
+// const { UInt32Schema } = require("bitcoinjs-lib/src/types");
+// const { expect } = require("chai");
+// const { formatEther, HDNodeWallet, UndecodedEventLog } = require("ethers");
+import { network } from "hardhat";
+const { ethers } = await network.connect();
+import { expect } from "chai";
 
 describe("FixedPriceEthExchange", function () {
-  let bbUSD, checkBook, fixedPriceEthEthExchange, owner, alice, bob;
+  let bbUSD: any, checkBook: any, fixedPriceEthEthExchange: any, owner: any, alice: any, bob: any;
   let initialPrice = 50190000n;
 
   beforeEach(async function () {
     [owner, alice, bob] = await ethers.getSigners();
-    // alice = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', ethers.provider)
+    alice = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', ethers.provider)
+    const HDWalletMessenger =
+      await ethers.getContractFactory("HDWalletMessenger");
+    let hDWalletMessenger = await HDWalletMessenger.deploy();
+
     const BbUSD = await ethers.getContractFactory("BbUSD");
     bbUSD = await BbUSD.deploy();
-
+    
     const CheckBook = await ethers.getContractFactory("CheckBook");
-    checkBook = await CheckBook.deploy();
-
+    checkBook = await CheckBook.deploy(bbUSD.target, hDWalletMessenger.target);
+    
     const FixedPriceEthExchange = await ethers.getContractFactory(
       "FixedPriceEthExchange",
     );
@@ -24,7 +31,7 @@ describe("FixedPriceEthExchange", function () {
     await bbUSD.preApprove(checkBook.target);
     await owner.sendTransaction({
       to: fixedPriceEthEthExchange.target,
-      value: ethers.parseEther("1.008"),
+      value: ethers.parseEther("1.04"),
     });
     await owner.sendTransaction({
       to: alice.address,
@@ -33,7 +40,7 @@ describe("FixedPriceEthExchange", function () {
   });
 
   describe("buyEthAndCall", function () {
-    it.only("should swap tokens for ETH call a function", async function () {
+    it("should swap tokens for ETH call a function", async function () {
       await bbUSD.mint(alice.address, 200n);
       await bbUSD
         .connect(alice)
@@ -44,13 +51,13 @@ describe("FixedPriceEthExchange", function () {
         "transferFrom",
         [alice.address, fixedPriceEthEthExchange.target, 100n],
       );
-      // const callValue2 = ethers.parseEther("0.008");
+      // const callValue2 = ethers.parseEther("0.01");
       let check = ethers.Wallet.createRandom(ethers.provider);
       const tokenAmount =
         (ethAmount * initialPrice) / (1000000n * ethers.parseEther("1"));
       const fundCheckCallData = checkBook.interface.encodeFunctionData(
         "fundCheck",
-        [bbUSD.target, check.address, 100n],
+        [check.address, 100n],
       );
 
       const userEthBalanceBefore = await ethers.provider.getBalance(
@@ -73,16 +80,19 @@ describe("FixedPriceEthExchange", function () {
           {
             target: checkBook.target,
             data: fundCheckCallData,
-            value: ethers.parseEther("0.008"),
+            value: ethers.parseEther("0.04"),
           },
         ],
         new Uint8Array(),
+        {
+          gasLimit: 10000000,
+        }
       );
-
-      await checkBook.connect(check).redeemCheck(bbUSD.target, bob);
+      await tx.wait()
+      await checkBook.connect(check).redeemCheck(bob, new Uint8Array(), new Uint8Array());
 
       const receipt = await tx.wait();
-      const gasCost = receipt.gasUsed * receipt.gasPrice;
+      const gasCost: bigint = BigInt(receipt.gasUsed) * BigInt(receipt.gasPrice);
 
       const userEthBalanceAfter = await ethers.provider.getBalance(
         alice.address,
