@@ -16,7 +16,7 @@ pub mod db;
 use alloy::{
     contract::{ContractInstance, Interface},
     dyn_abi::DynSolValue,
-    primitives::{Address, U256, address},
+    primitives::{Address, U256},
     providers::Provider,
     rpc::types::{Filter, Log},
 };
@@ -137,42 +137,6 @@ async fn get_index() -> axum::response::Result<impl IntoResponse> {
     Ok(HtmlTemplate(template))
 }
 
-#[derive(Deserialize)]
-struct TransactionsQuery {
-    address: String,
-}
-
-// async fn transactions(
-//     axum::extract::Query(params): axum::extract::Query<TransactionsQuery>,
-// ) -> axum::response::Result<impl IntoResponse> {
-//     let address = params.address;
-//     let checkbook_address = address!("0x168b0e3a5aD6343Ea1BAc552F72D8C7a88Cf65D6");
-//     let rpc_url = "https://rpc-core.icecreamswap.com";
-//     // let wss_url = "wss://ws.coredao.org";
-//     let filter = Filter
-//     {
-//         topics: [
-//             vec![CheckBook::CheckFunded::SIGNATURE_HASH, CheckBook::CheckRedeemed::SIGNATURE_HASH].into(),
-//             Address::parse_checksummed(address, None).unwrap().into(),
-//             Default::default(),
-//             Default::default(),
-//         ],
-//         address: checkbook_address.into(),
-//         ..Default::default()
-//     }
-//     .from_block(0);
-//     let rpc_provider = ProviderBuilder::new().connect_http(rpc_url.parse().unwrap());
-//     let sub = rpc_provider.get_logs(&filter).await.unwrap();
-
-//     let initial_hashes = sub
-//         .iter()
-//         .filter_map(|log| log.transaction_hash)
-//         .collect::<Vec<B256>>();
-
-//     let mut initial_transactions = get_transactions(initial_hashes).await.unwrap();
-//     initial_transactions.sort_by(|t1, t2| t2.block_number.cmp(&t1.block_number));
-//     Ok(json!(initial_transactions.into_iter().map(transaction_to_json).collect::<Vec<Value>>()).to_string())
-// }
 
 async fn get_magic(
     axum::extract::Path(check_address): axum::extract::Path<String>,
@@ -190,15 +154,14 @@ async fn get_magic(
     let abi = serde_json::from_str(&json.to_string()).unwrap();
 
     let contract = ContractInstance::new(
-        address!("0x168b0e3a5aD6343Ea1BAc552F72D8C7a88Cf65D6"),
+        CHECKBOOK_ADDRESS.clone(),
         provider.clone(),
         Interface::new(abi),
     );
     let amount_value = contract
         .function(
-            "checkAmounts",
+            "checks",
             &[
-                DynSolValue::from(address!("0xa84c5626954d01e0200050a800e9cdc3a00de7ff")),
                 DynSolValue::from(Address::parse_checksummed(&check_address, None).unwrap()), // address_value.first().unwrap().clone()
             ],
         )
@@ -346,9 +309,9 @@ async fn get_magic_image(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use alloy::primitives::LogData;
-    use hexlit::hex;
+    
+    
+    
 
     #[test]
     fn test_transaction_to_json() {

@@ -184,8 +184,6 @@ impl TransactionLogDataStream {
             .iter()
             .filter_map(|log| log.transaction_hash)
             .collect::<Vec<B256>>();
-        println!("searching for address: {:?}", address);
-        println!("{:?}", initial_hashes);
         let initial_transactions = get_transactions(initial_hashes).await?;
 
         // let ws = WsConnect::new(WSS_URL.clone());
@@ -196,7 +194,6 @@ impl TransactionLogDataStream {
             // let mut stream = get_event_stream().await;
             'outer: while let Ok(log) = receiver2.recv().await {
                 // println!("new log {:?}", log);
-                println!("searching for address {:?}", address);
                 let transaction_hashes: Vec<FixedBytes<32>> = vec![log]
                     .iter()
                     .filter(|log| {
