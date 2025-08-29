@@ -30,7 +30,6 @@ contract CheckBook is Ownable {
         uint256 _value
     );
 
-    mapping(address => bool) public preapprovedAddresses;
     struct Check {
         uint256 value;
         address from;
@@ -46,16 +45,13 @@ contract CheckBook is Ownable {
         hdWalletMessenger = HDWalletMessenger(_hdWalletMessenger);
     }
 
-    function setToken(address _token) external onlyOwner {
-        token = IERC20(_token);
-    }
 
     function fundCheck(
         address payable checkAddress,
         uint256 value
     ) external payable {
-        require(msg.value == transactionCost * 2, "invalid tx cost");
-        require(checks[checkAddress].value == 0, "already funded");
+        require(msg.value == transactionCost * 2);
+        require(checks[checkAddress].value == 0);
         token.transferFrom(msg.sender, address(this), value);
         checkAddress.transfer(transactionCost);
         checks[checkAddress] = Check({

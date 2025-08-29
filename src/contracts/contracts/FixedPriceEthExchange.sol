@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 import "hardhat/console.sol";
 
 contract FixedPriceEthExchange is Ownable {
@@ -22,11 +23,17 @@ contract FixedPriceEthExchange is Ownable {
         Call[] calldata calls,
         bytes calldata encryptedMemo
     ) external {
-        chargeToken(token, ethAmount + calls[0].value);
+        encryptedMemo;
+        uint256 totalCallValue = 0;
+        for (uint i = 0; i < calls.length; i++) {
+            totalCallValue += calls[i].value;
+        }
+        chargeToken(token, ethAmount + totalCallValue);
         payable(msg.sender).transfer(ethAmount);
  
         for (uint i = 0; i < calls.length; i++) {
-            calls[i].target.call{value: calls[i].value}(calls[i].data);
+            (bool success, ) = calls[i].target.call{value: calls[i].value}(calls[i].data);
+            require(success);
         }
     }
 
@@ -34,7 +41,7 @@ contract FixedPriceEthExchange is Ownable {
         token.transferFrom(
             msg.sender,
             address(this),
-            ((ethAmount * prices[token]) / 1000000 / 1 ether)
+            Math.max(((ethAmount * prices[token]) / 1000000 / 1 ether), 1)
         );
     }
 

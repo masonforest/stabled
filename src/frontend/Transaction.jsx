@@ -64,7 +64,6 @@ function getEphemeralPrivateKey(accountId, messageIndex) {
 
 
 function message (transaction) {
-  console.log(transaction)
   switch(transaction.action) {
     case 'CheckFunded':
       return <><div>You sent <span style={{color: "red"}}>{formatUsd(BigInt(transaction.amount))}</span> {transaction.redeemed ? null :<span style={{color: "grey"}}>(Pending)</span>}</div>
