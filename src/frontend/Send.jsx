@@ -185,7 +185,9 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
 
       switch (sendVia) {
         case "clipboard":
-          navigator.clipboard.writeText(checkUrl);
+          setTimeout(() => {
+            navigator.clipboard.writeText(checkUrl);
+          }, 0);
           break;
         case "telegram":
           break;
