@@ -132,7 +132,7 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
       const { gasPrice } = await window.coreWallet.provider.getFeeData();
       let callArgs = [
         window.bbUSD.target,
-        ethers.parseEther("0.06"),
+        ethers.parseEther("0.01"),
         [
           {
             target: window.bbUSD.target,
