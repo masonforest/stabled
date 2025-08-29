@@ -175,7 +175,7 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
         ...[
           ...callArgs,
           {
-            gasLimit: 1000000,
+            gasLimit: 250000,
           },
         ],
       );
