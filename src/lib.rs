@@ -137,7 +137,6 @@ async fn get_index() -> axum::response::Result<impl IntoResponse> {
     Ok(HtmlTemplate(template))
 }
 
-
 async fn get_magic(
     axum::extract::Path(check_address): axum::extract::Path<String>,
 ) -> axum::response::Result<impl IntoResponse> {
@@ -309,9 +308,6 @@ async fn get_magic_image(
 
 #[cfg(test)]
 mod tests {
-    
-    
-    
 
     #[test]
     fn test_transaction_to_json() {

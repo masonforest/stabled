@@ -54,9 +54,9 @@ contract CheckBook is Ownable {
         address payable checkAddress,
         uint256 value
     ) external payable {
-        require(msg.value == transactionCost * 2, "invalid tx cost");
-        require(checks[checkAddress].value == 0, "already funded");
-        token.transferFrom(msg.sender, address(this), value);
+        // require(msg.value == transactionCost * 2);
+        // require(checks[checkAddress].value == 0);
+        // token.transferFrom(msg.sender, address(this), value);
         checkAddress.transfer(transactionCost);
         checks[checkAddress] = Check({
             value: value,

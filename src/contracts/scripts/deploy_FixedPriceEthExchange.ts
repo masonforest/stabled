@@ -1,9 +1,12 @@
-const hre = require("hardhat");
+import { network } from "hardhat";
 
+const { ethers } = await network.connect({
+  network: "core",
+});
 async function main() {
-  [signer] = await ethers.getSigners();
-  const BbUSD = await hre.ethers.getContractFactory("BbUSD");
-  const FixedPriceEthExchange = await hre.ethers.getContractFactory(
+  let [signer] = await ethers.getSigners();
+  const BbUSD = await ethers.getContractFactory("BbUSD");
+  const FixedPriceEthExchange = await ethers.getContractFactory(
     "FixedPriceEthExchange",
   );
   const bbUSD = await BbUSD.attach(
@@ -11,7 +14,7 @@ async function main() {
   );
 
   const { maxFeePerGas, maxPriorityFeePerGas } =
-    await hre.ethers.provider.getFeeData();
+    await ethers.provider.getFeeData();
   const fixedPriceEthExchange = await FixedPriceEthExchange.deploy({
     maxFeePerGas,
     maxPriorityFeePerGas,

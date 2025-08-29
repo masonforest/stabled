@@ -41,7 +41,7 @@ describe("FixedPriceEthExchange", function () {
 
   describe("buyEthAndCall", function () {
     it("should swap tokens for ETH call a function", async function () {
-      await bbUSD.mint(alice.address, 200n);
+      await bbUSD.mint(alice.address, 201n);
       await bbUSD
         .connect(alice)
         .approve(fixedPriceEthEthExchange.target, ethers.MaxUint256);

@@ -17,7 +17,6 @@ import Deposit from "./Deposit";
 import FixedPriceEthExchangeAbi from "./abi/contracts/FixedPriceEthExchange.sol/FixedPriceEthExchange.json";
 import CheckBookAbi from "./abi/contracts/CheckBook.sol/CheckBook.json";
 import Loading from "./Loading";
-import MagicLink from "./MagicLink";
 import Send from "./Send";
 import Transaction from "./Transaction";
 import SideNav from "./SideNav";
@@ -45,7 +44,7 @@ let USD = new Intl.NumberFormat("en-US", {
   currency: "USD",
 });
 
-function formatUsd(value) {
+export function formatUsd(value) {
   if (!value) {
     return;
   }
@@ -94,11 +93,8 @@ async function encrypt(ephemeralPrivateKey, publicKey, message) {
 }
 
 function App() {
-  // const [transactions, setTransactions] = useState([
-  //   // "0x409e28d995478f3f5236756451d77a1b8930e05d299e11cd632ea1721ab49451",
-  // ]);
   const [transactions, addTransaction] = useReducer((state, action) => {
-  
+    console.log(action)
     if (action.action === 'CheckRedeemed' && action.from === window.coreWallet.address.toLowerCase()) {
       return state.map(existingAction => 
           existingAction.action === 'CheckFunded' && 
@@ -173,7 +169,6 @@ function App() {
         },
       );
       esRef.current.onmessage = async ({ data }) => {
-        console.log(JSON.parse(data))
         // console.log(transactions.length)
         addTransaction(
           JSON.parse(data),
@@ -198,7 +193,7 @@ function App() {
       );
 
       window.checkBook = new ethers.Contract(
-        "0x5c541Da45961fdC5dC8e999a08E256011447e226",
+        "0xe2E59bdA6dfF152c5e0aBdc08Cc7f951BB8F211e",
         CheckBookAbi,
         window.coreWallet,
       );
@@ -214,7 +209,7 @@ function App() {
         window.coreWallet,
       );
       window.fixedPriceEthExchange = new ethers.Contract(
-        "0x6d78354C0Cf8a74549Dffc392F55e4A0E95dDbE3",
+        "0xc5E76b9E8d47a6690413A06aA64b3DF7e9C6121A",
         FixedPriceEthExchangeAbi,
         window.coreWallet,
       );
@@ -381,6 +376,7 @@ function App() {
             <Tab.Pane eventKey="send">
               <Send
                 usdBalance={usdBalance}
+                setUsdBalance={setUsdBalance}
                 magicLink={magicLink}
                 privateKey={null}
               />
