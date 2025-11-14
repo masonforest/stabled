@@ -161,7 +161,7 @@ async fn get_magic(
         .function(
             "checks",
             &[
-                DynSolValue::from(Address::parse_checksummed(&check_address, None).unwrap()), // address_value.first().unwrap().clone()
+                DynSolValue::from(Address::parse_checksummed(&check_address, None).unwrap_or_default()), // address_value.first().unwrap().clone()
             ],
         )
         .unwrap()
