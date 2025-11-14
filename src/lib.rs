@@ -301,7 +301,7 @@ async fn get_magic_image(
     input.arg("-size");
     input.arg("900x556");
 
-    input.arg(format!("label:${}", Decimal::new(amount, 2)));
+    input.arg(format!("label:${}", alloy::utils::format_ether(amount)));
     input.arg("PNG:-");
     Ok((headers, input.output().unwrap().stdout))
 }
