@@ -20,6 +20,10 @@ src/contracts/artifacts
 src/contracts/ignition
 src/contracts/cache
 src/contracts/hardhat.config.js
+src/contracts/hardhat.config.ts
+src/contracts_old/hardhat.config.js
+src/contracts_old/hardhat.config.ts
+
 
 
 dist
