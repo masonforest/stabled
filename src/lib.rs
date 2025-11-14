@@ -174,7 +174,7 @@ async fn get_magic(
 
         description: Some(format!(
             "Accept ${} on the Stable Network",
-            Decimal::new(amount.to::<i64>(), 2)
+            alloy::primitives::utils::format_ether(amount).trim_end_matches('0')
         )),
         image: Some(format!("/images/{}", amount.to::<i64>())),
         ..Default::default()
@@ -278,6 +278,8 @@ async fn get_magic_image(
         .unwrap()
         .parse()
         .unwrap();
+println!("{}", alloy::primitives::utils::format_ether(amount).trim_end_matches('0'));
+println!("{}", amount);
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, "image/png;".parse().unwrap());
     headers.insert(
@@ -301,7 +303,7 @@ async fn get_magic_image(
     input.arg("-size");
     input.arg("900x556");
 
-    input.arg(format!("label:${}", alloy::primitives::utils::format_ether(amount)));
+    input.arg(format!("label:${}", alloy::primitives::utils::format_ether(amount).trim_end_matches('0')));
     input.arg("PNG:-");
     Ok((headers, input.output().unwrap().stdout))
 }
