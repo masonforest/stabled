@@ -21,10 +21,9 @@
     "borsher": "^3.5.0",
     "buffer": "^6.0.3",
     "eciesjs": "^0.4.14",
-    "ethers": "^6.13.5",
+    "ethers": "^6.15.0",
     "lodash": "^4.17.21",
     "micro-packed": "^0.7.0",
-    "prettier": "^3.5.3",
     "qrcode.react": "^4.1.0",
     "react": "^18.3.1",
     "react-bootstrap": "^2.10.5",
@@ -43,6 +42,8 @@
     "eslint-plugin-react-refresh": "^0.4.12",
     "globals": "^15.9.0",
     "hardhat-abi-exporter": "^2.10.1",
+    "prettier": "^3.6.2",
+    "prettier-plugin-solidity": "^2.2.0",
     "vite": "^6.2.2"
   }
 }

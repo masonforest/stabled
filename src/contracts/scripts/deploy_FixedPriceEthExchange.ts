@@ -1,32 +1,36 @@
 import { network } from "hardhat";
 
 const { ethers } = await network.connect({
-  network: "core",
+  // network: "core",
 });
 async function main() {
   let [signer] = await ethers.getSigners();
-  const BbUSD = await ethers.getContractFactory("BbUSD");
-  const FixedPriceEthExchange = await ethers.getContractFactory(
-    "FixedPriceEthExchange",
+  let initialPrice = ethers.parseEther("1097.63860507");
+  const AsUSDF = await ethers.getContractFactory("asUSDF");
+  const asUSDF = await AsUSDF.attach(
+    "0x917AF46B3C3c6e1Bb7286B9F59637Fb7C65851Fb",
   );
-  const bbUSD = await BbUSD.attach(
-    "0xa84c5626954D01E0200050a800E9CDc3a00DE7FF",
+  const FixedPriceEthExchange = await ethers.getContractFactory(
+  "FixedPriceEthExchange",
   );
 
   const { maxFeePerGas, maxPriorityFeePerGas } =
     await ethers.provider.getFeeData();
-  const fixedPriceEthExchange = await FixedPriceEthExchange.deploy({
+  const fixedPriceEthExchange = await FixedPriceEthExchange.deploy(
+    asUSDF.target,
+    initialPrice,
+    {
     maxFeePerGas,
     maxPriorityFeePerGas,
   });
   await fixedPriceEthExchange.waitForDeployment();
-  await bbUSD.preApprove(fixedPriceEthExchange.target, {
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-  })
+  // await bbUSD.preApprove(fixedPriceEthExchange.target, {
+  //   maxFeePerGas,
+  //   maxPriorityFeePerGas,
+  // })
   await signer.sendTransaction({
     to: fixedPriceEthExchange.target,
-    value: ethers.parseEther("0.25"),
+    value: ethers.parseEther("0.00005"),
   });
   console.log(fixedPriceEthExchange.target);
 

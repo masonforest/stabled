@@ -42,7 +42,8 @@ lazy_static! {
             .clone()))
         .unwrap_or(vec![]);
     pub static ref COIN_MARKET_CAP_KEY: String = env::var("COIN_MARKET_CAP_KEY").unwrap();
-    pub static ref CHECKBOOK_ADDRESS: Address = address!("0xe2E59bdA6dfF152c5e0aBdc08Cc7f951BB8F211e");
+    pub static ref CHECKBOOK_ADDRESS: Address = address!("0xcD09E4f008c97938A20216f957C3E656a4272A93");
+    pub static ref ASUSDF_ADDRESS: Address = address!("0x917af46b3c3c6e1bb7286b9f59637fb7c65851fb");
     pub static ref WSS_URL: String = env::var("WSS_URL").unwrap();
     pub static ref RPC_URL: String = env::var("RPC_URL").unwrap();
 

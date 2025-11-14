@@ -2,20 +2,29 @@ import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import * as secp256k1 from "@noble/secp256k1";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useMemo, useState, useCallback, useRef , useReducer, memo} from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  useReducer,
+  memo,
+} from "react";
 import { ethers } from "ethers";
-import * as secp from '@noble/secp256k1';
+import * as secp from "@noble/secp256k1";
 import { HDNodeWallet } from "ethers/wallet";
 import { base64urlnopad } from "@scure/base";
 import { uniqBy } from "lodash";
 import Modal from "react-bootstrap/Modal";
 import Nav from "react-bootstrap/Nav";
 import Tab from "react-bootstrap/Tab";
-import BbUsdAbi from "./abi/contracts/BbUSD.sol/BbUSD.json";
+import AsUSDFAbi from "./abi/contracts/asUSDF.sol/asUSDF.json";
 import HDWalletMessengerAbi from "./abi/contracts/HDWalletMessenger.sol/HDWalletMessenger.json";
 import Deposit from "./Deposit";
 import FixedPriceEthExchangeAbi from "./abi/contracts/FixedPriceEthExchange.sol/FixedPriceEthExchange.json";
 import CheckBookAbi from "./abi/contracts/CheckBook.sol/CheckBook.json";
+import asUSDFEarnAbi from "./abi/contracts/AsUSDFEarn.sol/AsUSDFEarn.json";
 import Loading from "./Loading";
 import Send from "./Send";
 import Transaction from "./Transaction";
@@ -31,6 +40,7 @@ import { HDKey } from "@scure/bip32";
 import { xchacha20poly1305 } from "@noble/ciphers/chacha";
 import { utf8ToBytes } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/webcrypto";
+import { useWindowSize } from "react-use";
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
   hmac(sha256, k, secp256k1.etc.concatBytes(...m));
 const mnemonic2 =
@@ -39,6 +49,7 @@ const checkId = parseInt(window.location.pathname.slice(1));
 // const isMagicLink = Number.isInteger(checkId);
 const checkEntropy = window.location.hash.slice(1);
 
+const VESTING_PERIOD = 28800n;
 let USD = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -72,11 +83,13 @@ export const stable = new StableNetwork({
 
 function decryptForRecipient(privateKey, encryptedMessage) {
   const ephemeralPublicKey = encryptedMessage.slice(0, 33);
-  const nonce = ephemeralPublicKey.slice(0,24);
+  const nonce = ephemeralPublicKey.slice(0, 24);
   const ciphertext = encryptedMessage.slice(33);
   const secret = secp.getSharedSecret(privateKey, ephemeralPublicKey, true);
   const key = secret.slice(0, 32);
-  return new TextDecoder().decode(xchacha20poly1305(key, nonce).decrypt(ciphertext));
+  return new TextDecoder().decode(
+    xchacha20poly1305(key, nonce).decrypt(ciphertext)
+  );
 }
 
 async function encrypt(ephemeralPrivateKey, publicKey, message) {
@@ -92,38 +105,118 @@ async function encrypt(ephemeralPrivateKey, publicKey, message) {
   return encrypted;
 }
 
-function App() {
-  const [transactions, addTransaction] = useReducer((state, action) => {
-    console.log(action)
-    if (action.action === 'CheckRedeemed' && action.from === window.coreWallet.address.toLowerCase()) {
-      return state.map(existingAction => 
-          existingAction.action === 'CheckFunded' && 
-          existingAction.checkAddress === action.checkAddress
-            ? {...existingAction, redeemed: true}
-            : existingAction
-        )
+function useInterval(callback, delay) {
+  const savedCallback = useRef();
+
+  // Remember the latest callback.
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  // Set up the interval.
+  useEffect(() => {
+    function tick() {
+      savedCallback.current();
     }
-    return [action,...state]
-  }
-  , [])
+    if (delay !== null) {
+      let id = setInterval(tick, delay);
+      return () => clearInterval(id);
+    }
+  }, [delay]);
+}
+
+function App() {
+  // console.log((ethers.WeiPerEther * ethers.WeiPerEther) > ethers.MaxInt256)
+  // console.log((ethers.WeiPerEther * ethers.WeiPerEther) ,  ethers.MaxInt256)
+  // let initialPrice = ethers.parseEther("1173.91");
+
+  // let transactionPrice = ((initialPrice * ethers.parseEther("0.014066819324378617"))/ethers.WeiPerEther)
+  // console.log("----")
+  // console.log("in ether",  ethers.formatEther(transactionPrice) )
+  // console.log((ethers.parseEther("1") * ethers.parseEther("1")) / ethers.WeiPerEther / ethers.WeiPerEther)
+  const [transactions, addTransaction] = useReducer((state, action) => {
+    console.log(action);
+    if (
+      action.action === "CheckRedeemed" &&
+      action.from === window.coreWallet.address.toLowerCase()
+    ) {
+      return state.map((existingAction) =>
+        existingAction.action === "CheckFunded" &&
+        existingAction.checkAddress === action.checkAddress
+          ? { ...existingAction, redeemed: true }
+          : existingAction
+      );
+    }
+    return [action, ...state];
+  }, []);
   const [checkBalance, setCheckBalance] = useState();
   const [checkMemo, setCheckMemo] = useState();
   const [magicLink, setMagicLink] = useState();
   const [checkAddress, setCheckAddress] = useState(
-    parseInt(window.location.pathname.slice(1)),
+    parseInt(window.location.pathname.slice(1))
   );
 
   const [usdBalance, setUsdBalance] = useState();
+  const [asUSDFContractBalance, setAsUSDFContractBalance] = useState();
+  const [asUSDFTotalSupply, setAsUSDFTotalSupply] = useState();
+  const [asUSDFLastDispatchTime, setAsUSDFLastDispatchTime] = useState();
+  const [asUSDFLastReward, setAsUSDFLastReward] = useState();
+  // const [asUSDFExchangeRate, setAsUSDFExchangeRate] = useState(1n);
+  const [timestamp, setTimestamp] = useState(
+    BigInt(Math.floor(Date.now() / 1000))
+  );
   const [utxos, setUtxos] = useState([]);
 
   const esRef = useRef(null);
+  useInterval(() => {
+    setTimestamp(timestamp + 1n);
+  }, 1000);
+  const asUSDFExchangeRate = useMemo(() => {
+    if (
+      typeof asUSDFContractBalance === "undefined" ||
+      typeof asUSDFTotalSupply === "undefined" ||
+      typeof timestamp === "undefined" ||
+      typeof asUSDFLastDispatchTime === "undefined" ||
+      typeof asUSDFLastReward === "undefined" ||
+      asUSDFTotalSupply === 0n
+    ) {
+      return ethers.WeiPerEther;
+    }
+      const timeSinceLastDistribution = timestamp - asUSDFLastDispatchTime;
+      if (timeSinceLastDistribution >= VESTING_PERIOD) {
+            return 0n;
+        }
+        const deltaT = (VESTING_PERIOD - timeSinceLastDistribution);
+        const unvestedAmount = (deltaT * asUSDFLastReward) / VESTING_PERIOD;
+    // console.log(asUSDFContractBalance)
+    // console.log({
+    //   asUSDFContractBalance,
+    //   asUSDFTotalSupply,
+    //   timestamp,
+    //   asUSDFLastDispatchTime,
+    //   asUSDFLastReward,
+    //   timeSinceLastDistribution,
+    //   deltaT,
+    //   unvestedAmount
+    // })
+    
+    return (asUSDFContractBalance - unvestedAmount) * ethers.WeiPerEther / asUSDFTotalSupply;
+  }, [
+    asUSDFContractBalance,
+    asUSDFTotalSupply,
+    timestamp,
+    asUSDFLastDispatchTime
+  ]);
+  // console.log(asUSDFExchangeRate)
 
   useEffect(() => {
-    const coreProvider = new ethers.JsonRpcProvider("https://rpc.coredao.org");
+    const coreProvider = new ethers.JsonRpcProvider("https://0.48.club");
     window.coreWallet = ethers.Wallet.fromPhrase(
       localStorage.mnemonic,
-      coreProvider,
+      coreProvider
     );
+
+    // console.log(timestamp);
     // console.log(base64urlnopad.encode(ethers.getBytes(window.coreWallet.publicKey)))
     const seed = bip39.mnemonicToEntropy(localStorage.mnemonic, english);
 
@@ -143,14 +236,14 @@ function App() {
 
   // useEffect(() => {
   //   async function fetchData() {
-  //     setCheckBalance(window.BbUSD.checks(check.address))
+  //     setCheckBalance(window.AsUSDF.checks(check.address))
   //   }
   //   fetchData();
   // })
   // useEffect(() => {
   //   async function fetchTransactions() {
   //     const response = await fetch(`http://192.168.0.11/transactions?address=${window.coreWallet.address}`);
-      
+
   //     // setTransactions([
   //     //   ...transactions,
   //     //   ...await response.json()
@@ -166,18 +259,16 @@ function App() {
         `/sse?address=${window.coreWallet.address}`,
         {
           withCredentials: true,
-        },
+        }
       );
       esRef.current.onmessage = async ({ data }) => {
         // console.log(transactions.length)
-        addTransaction(
-          JSON.parse(data),
-        )
-      }
+        addTransaction(JSON.parse(data));
+      };
       // const { log, transactionHash } = JSON.parse(data);
-      // let event = window.bbUSD.interface.parseLog(log);
-      // setUsdBalance(await window.bbUSD.balanceOf(window.coreWallet.address));
-    };
+      // let event = window.asUSDF.interface.parseLog(log);
+      // setUsdBalance(await window.asUSDF.balanceOf(window.coreWallet.address));
+    }
     esRef.current.onerror = (e, x) => console.log(e);
     return () => {
       esRef.current && esRef.current.close();
@@ -186,65 +277,94 @@ function App() {
   }, [addTransaction]);
   useEffect(() => {
     async function fetchData() {
-      window.bbUSD = new ethers.Contract(
-        "0xa84c5626954D01E0200050a800E9CDc3a00DE7FF",
-        BbUsdAbi,
-        window.coreWallet,
+      window.USDF = new ethers.Contract(
+        "0x5a110fc00474038f6c02e89c707d638602ea44b5",
+        AsUSDFAbi,
+        window.coreWallet
+      );
+      window.asUSDF = new ethers.Contract(
+        "0x917af46b3c3c6e1bb7286b9f59637fb7c65851fb",
+        AsUSDFAbi,
+        window.coreWallet
+      );
+      window.asUSDFEarn = new ethers.Contract(
+        "0xdB57a53C428a9faFcbFefFB6dd80d0f427543695",
+        asUSDFEarnAbi,
+        window.coreWallet
       );
 
       window.checkBook = new ethers.Contract(
-        "0xe2E59bdA6dfF152c5e0aBdc08Cc7f951BB8F211e",
+        "0x4bf5a51928cB7B83b9b041DA7Ef372bae8138775",
         CheckBookAbi,
-        window.coreWallet,
+        window.coreWallet
       );
-      // console.log((await window.bbUSD.balanceOf(window.coreWallet.address)));
-      setUsdBalance(await window.bbUSD.balanceOf(window.coreWallet.address));
-      // bbUSD.on("*", async (resp) => {
-      // setUsdBalance((await window.bbUSD.balanceOf(window.coreWallet.address)));
+
+      //     window.asUSDFEarn = new ethers.Contract(
+      //       "0xdB57a53C428a9faFcbFefFB6dd80d0f427543695",
+      //     [
+      //   "function exchangePrice() view returns (uint256)",
+
+      // ],
+      //       window.coreWallet,
+      //     );
+      // console.log(window.asUSDF.target);
+      // console.log(await window.asUSDF.balanceOf(window.coreWallet.address));
+
+      setUsdBalance(await window.asUSDF.balanceOf(window.coreWallet.address));
+      setAsUSDFContractBalance(await window.USDF.balanceOf(window.asUSDFEarn.target));
+      setAsUSDFTotalSupply(await window.asUSDF.totalSupply());
+      setAsUSDFLastDispatchTime(await window.asUSDFEarn.lastDispatchTime());
+      setAsUSDFLastReward(await window.asUSDFEarn.lastReward());
+      // console.log(await window.asUSDFEarn.exchangePrice());
+      // setAsUSDFExchangeRate(await window.asUSDFEarn.exchangePrice());
+      // asUSDF.on("*", async (resp) => {
+      // setUsdBalance((await window.asUSDF.balanceOf(window.coreWallet.address)));
       // console.log("response: ", resp);
       // });
       window.hDWalletMessenger = new ethers.Contract(
-        "0x6F39c7c97e5A095A595774e2D773fD253d1eD1a7",
+        "0xe35FCA78813F21a5a3abEf96e2e71A9d0bc059AC",
         HDWalletMessengerAbi,
-        window.coreWallet,
+        window.coreWallet
       );
       window.fixedPriceEthExchange = new ethers.Contract(
-        "0xc5E76b9E8d47a6690413A06aA64b3DF7e9C6121A",
+        "0x99209fdB94b05f43B3eaa434E550CCB5D52e9493",
         FixedPriceEthExchangeAbi,
-        window.coreWallet,
+        window.coreWallet
       );
       if (checkAddress) {
         const checkSeed = base64urlnopad.decode(checkEntropy);
         const check = HDNodeWallet.fromSeed(checkSeed);
         const coreProvider = new ethers.JsonRpcProvider(
-          "https://rpc.coredao.org",
+          "https://0.48.club/"
         );
         window.checkWallet = check.connect(coreProvider);
-        setCheckBalance(
-          (await window.checkBook.checks(
-            check.address,
-          )).value,
-        );
-        const log = await window.coreWallet.provider.getLogs({
-                      address: window.checkBook.target,
-                      fromBlock: 0,
-                      topics: [
-                        window.checkBook.interface.getEvent("CheckFunded").topicHash,
-                        ethers.zeroPadValue(
-                          check.address.toLowerCase(),
-                          32,
-                        ),
-                      ],
-                    });
-            const tx = await window.coreWallet.provider.getTransaction(log[0].transactionHash)
-            const decodedData = window.fixedPriceEthExchange.interface.decodeFunctionData("buyEthAndCall", tx.data);
-            setCheckMemo(
-              await decryptForRecipient(ethers.getBytes(check.privateKey), ethers.getBytes(decodedData[3]))
-            );
+        setCheckBalance((await window.checkBook.checks(check.address)).value);
+        // const log = await window.coreWallet.provider.getLogs({
+        //   address: window.checkBook.target,
+        //   fromBlock: 0,
+        //   topics: [
+        //     window.checkBook.interface.getEvent("CheckFunded").topicHash,
+        //     ethers.zeroPadValue(check.address.toLowerCase(), 32),
+        //   ],
+        // });
+        // const tx = await window.coreWallet.provider.getTransaction(
+        //   log[0].transactionHash
+        // );
+        // const decodedData =
+        //   window.fixedPriceEthExchange.interface.decodeFunctionData(
+        //     "buyEthAndCall",
+        //     tx.data
+        //   );
+        // setCheckMemo(
+        //   await decryptForRecipient(
+        //     ethers.getBytes(check.privateKey),
+        //     ethers.getBytes(decodedData[3])
+        //   )
+        // );
 
-        // window.bbUSD = new ethers.Contract(
+        // window.asUSDF = new ethers.Contract(
         //   "0x61ee0769fb9249c69A82f46B7C6dF94576a9392d",
-        //   BbUsdAbi,
+        //   AsUSDFAbi,
         //   window.coreWallet,
         // );
       }
@@ -254,10 +374,10 @@ function App() {
       //       Object.groupBy(
       //         [
       //           ...(await window.coreWallet.provider.getLogs({
-      //             address: window.bbUSD.target,
+      //             address: window.asUSDF.target,
       //             fromBlock: 0,
       //             topics: [
-      //               window.bbUSD.interface.getEvent("Transfer").topicHash,
+      //               window.asUSDF.interface.getEvent("Transfer").topicHash,
       //               null,
       //               ethers.zeroPadValue(
       //                 window.coreWallet.address.toLowerCase(),
@@ -266,10 +386,10 @@ function App() {
       //             ],
       //           })),
       //           ...(await window.coreWallet.provider.getLogs({
-      //             address: window.bbUSD.target,
+      //             address: window.asUSDF.target,
       //             fromBlock: 0,
       //             topics: [
-      //               window.bbUSD.interface.getEvent("Transfer").topicHash,
+      //               window.asUSDF.interface.getEvent("Transfer").topicHash,
       //               ethers.zeroPadValue(
       //                 window.coreWallet.address.toLowerCase(),
       //                 32,
@@ -281,7 +401,7 @@ function App() {
       //       ),
       //     ).flatMap((logs) =>
       //       logs.map((log) => ({
-      //         ...bbUSD.interface.parseLog(log),
+      //         ...asUSDF.interface.parseLog(log),
       //         transactionHash: log.transactionHash,
       //       })),
       //     ),
@@ -292,19 +412,19 @@ function App() {
     fetchData();
   }, []);
 
-
   const redeemCheck = useCallback(
     (event) => {
       event.preventDefault();
       (async () => {
-        window.bbUSD.connect(window.checkWallet);
-        // window.bbUSD.once(window.bbUSD.filters.CheckRedeemed(window.coreWallet.address), async (event) => {
+        console.log("red")
+        window.asUSDF.connect(window.checkWallet);
+        // window.asUSDF.once(window.asUSDF.filters.CheckRedeemed(window.coreWallet.address), async (event) => {
         //   setCheckAddress()
         // })
 
-        const checkAmount = (await window.checkBook.checks(
-          window.checkWallet.address,
-        )).value;
+        const checkAmount = (
+          await window.checkBook.checks(window.checkWallet.address)
+        ).value;
         setUsdBalance(usdBalance + checkAmount);
         setCheckAddress();
         history.pushState({}, "", `/`);
@@ -318,15 +438,18 @@ function App() {
           .redeemCheck(
             window.coreWallet.address,
             window.coreWallet.publicKey,
-            ephemeralPublicKeyAndCipherText
+            ephemeralPublicKeyAndCipherText,
+                    {
+                      gasPrice: ethers.parseUnits("0.051", "gwei"),  
+                    }
           );
       })();
     },
-    [usdBalance, checkMemo],
+    [usdBalance, checkMemo]
   );
   const isLoading = useMemo(
     () => [usdBalance].some((value) => typeof value === "undefined"),
-    [usdBalance],
+    [usdBalance]
   );
   return isLoading ? (
     <Loading></Loading>
@@ -371,11 +494,11 @@ function App() {
               {" "}
               <Withdraw />
             </Tab.Pane>
-            <Tab.Pane eventKey="magic-link">
-            </Tab.Pane>
+            <Tab.Pane eventKey="magic-link"></Tab.Pane>
             <Tab.Pane eventKey="send">
               <Send
                 usdBalance={usdBalance}
+                asUSDFExchangeRate={asUSDFExchangeRate}
                 setUsdBalance={setUsdBalance}
                 magicLink={magicLink}
                 privateKey={null}
@@ -432,8 +555,8 @@ function App() {
             onClick={(e) => redeemCheck(e)}
             className="btn btn-success btn-xlg w-100"
           >
-            <title>Accept {formatUsd(checkBalance)}</title>
-            Accept {formatUsd(checkBalance)}
+            <title>Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}</title>
+            Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}
           </button>
         </Modal.Body>
       </Modal>
@@ -450,7 +573,9 @@ function App() {
             A payment was made to you in Bitcoin transaction{" "}
             <a
               target="_blank"
-              href={`https://mempool.space/tx/${utxos[0] && Buffer.from(utxos[0].transaction_id).toString("hex")}?mode=details`}
+              href={`https://mempool.space/tx/${
+                utxos[0] && Buffer.from(utxos[0].transaction_id).toString("hex")
+              }?mode=details`}
             >
               {utxos[0] &&
                 Buffer.from(utxos[0].transaction_id)

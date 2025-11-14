@@ -15,7 +15,7 @@ import { formatUsd } from "./App";
 async function encrypt(messageIndex, bobPublicKey, message) {
   const ephemeralPrivateKey = getEphemeralPrivateKey(
     messageIndex,
-    messageIndex,
+    messageIndex
   );
   const ephemeralPublicKey = secp.getPublicKey(ephemeralPrivateKey, true);
   const nonce = ephemeralPublicKey.slice(0, 24);
@@ -34,9 +34,9 @@ function getEphemeralPrivateKey(accountId, messageIndex) {
     HDNodeWallet.fromMnemonic(
       ethers.Mnemonic.fromPhrase(
         localStorage.mnemonic,
-        `e/1116' ${accountId}' /${messageIndex}`,
-      ),
-    ).privateKey,
+        `e/1116' ${accountId}' /${messageIndex}`
+      )
+    ).privateKey
   );
 }
 
@@ -84,10 +84,10 @@ function SendViaButton({ sendVia, loading, checkUrl, onClick }) {
     </a>
   );
 }
-function Send({ usdBalance, magicLink, setUsdBalance }) {
+function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
   const [checkSeed, setCheckSeed] = useState(null);
-  const [sendVia, setSendVia] = useState("sms");
+  const [sendVia, setSendVia] = useState("clipboard");
   const [loading, setLoading] = useState(false);
 
   const [value, setValue] = useState(import.meta.env.DEV ? "0.01" : null);
@@ -98,20 +98,77 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
   }, []);
   let check = useMemo(
     () => checkSeed && HDNodeWallet.fromSeed(checkSeed),
-    [checkSeed],
+    [checkSeed]
   );
   let checkUrl = useMemo(() => {
     if (!checkSeed) return null;
     if (sendVia === "x") {
-      return `https://x.com/messages/compose?text=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}%23${base64urlnopad.encode(checkSeed)}`;
+      return `https://x.com/messages/compose?text=${
+        window.location.protocol
+      }//${window.location.hostname}${
+        window.location.port ? ":" + window.location.port : ""
+      }/${check.address}%23${base64urlnopad.encode(checkSeed)}`;
     } else if (sendVia === "telegram") {
-      return `https://t.me/share/url?url=${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`;
+      return `https://t.me/share/url?url=${window.location.protocol}//${
+        window.location.hostname
+      }${window.location.port ? ":" + window.location.port : ""}/${
+        check.address
+      }#${base64urlnopad.encode(checkSeed)}`;
     } else {
-      return `${window.location.protocol}//${window.location.hostname}${window.location.port ? ":" + window.location.port : ""}/${check.address}#${base64urlnopad.encode(checkSeed)}`;
+      return `${window.location.protocol}//${window.location.hostname}${
+        window.location.port ? ":" + window.location.port : ""
+      }/${check.address}#${base64urlnopad.encode(checkSeed)}`;
     }
   }, [checkSeed, check, sendVia]);
 
   if (!check) return null;
+
+  const signPermitV4 = async function ({ signer, tokenAddress, spender }) {
+    const provider = signer.provider;
+
+    const abi = [
+      "function name() view returns (string)",
+      "function nonces(address) view returns (uint256)",
+    ];
+    const token = new ethers.Contract(tokenAddress, abi, provider);
+
+    const types = {
+      Permit: [
+        { name: "owner", type: "address" },
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+
+    const value = {
+      owner: signer.address,
+      spender: spender,
+      value: ethers.MaxUint256,
+      nonce: await token.nonces(signer.address),
+      deadline: ethers.MaxUint256,
+    };
+
+    const chainId = (await provider.getNetwork()).chainId;
+    const domain = {
+      name: await token.name(),
+      version: "1",
+      chainId,
+      verifyingContract: token.target,
+    };
+    console.log("domain", domain);
+    console.log("value", value);
+
+    const signature = await signer.signTypedData(domain, types, value);
+    const { v, r, s } = ethers.Signature.from(signature);
+
+    return {
+      v,
+      r,
+      s,
+    };
+  };
 
   const fundCheck = async (event) => {
     if (sendVia === "clipboard" || sendVia === "qr" || sendVia === "sms") {
@@ -121,22 +178,44 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
     try {
       let messageIndex =
         (await window.hDWalletMessenger.messageIndecies(
-          window.coreWallet.address,
+          window.coreWallet.address
         )) + 1n;
       let ephemeralPublicKeyAndCipherText = await encrypt(
         messageIndex,
         ethers.getBytes(check.publicKey),
-        new TextEncoder().encode(memo || ""),
+        new TextEncoder().encode(memo || "")
       );
       let transferValue = BigInt(parseFloat(value) * 100);
       const { gasPrice } = await window.coreWallet.provider.getFeeData();
+
+      const { v, r, s } = await signPermitV4({
+        signer: window.coreWallet,
+        tokenAddress: window.asUSDF.target,
+        spender: window.checkBook.target,
+      });
+      console.log("after swpm");
+      console.log(ethers.MaxUint256);
+      console.log([v, r, s]);
+      console.log("after swpm2");
       let callArgs = [
-        window.bbUSD.target,
-        ethers.parseEther("0.01"),
+        ethers.parseEther("0.0000087"),
         [
           {
-            target: window.bbUSD.target,
-            data: await window.bbUSD.interface.encodeFunctionData(
+            target: window.asUSDF.target,
+            data: await window.asUSDF.interface.encodeFunctionData("permit", [
+              window.coreWallet.address,
+              window.fixedPriceEthExchange.target,
+              ethers.MaxUint256,
+              ethers.MaxUint256,
+              v,
+              r,
+              s,
+            ]),
+            value: 0,
+          },
+          {
+            target: window.asUSDF.target,
+            data: await window.asUSDF.interface.encodeFunctionData(
               "transferFrom",
               [
                 window.coreWallet.address,
@@ -146,22 +225,22 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
             ),
             value: 0,
           },
-          {
-            target: window.checkBook.target,
-            data: await window.checkBook.interface.encodeFunctionData(
-              "fundCheck",
-              [check.address, BigInt(parseFloat(value) * 100)],
-            ),
-            value: ethers.parseEther("0.04"),
-          },
-          {
-            target: window.hDWalletMessenger.target,
-            data: await window.hDWalletMessenger.interface.encodeFunctionData(
-              "send",
-              [check.publicKey],
-            ),
-            value: 0,
-          },
+          // {
+          //   target: window.checkBook.target,
+          //   data: await window.checkBook.interface.encodeFunctionData(
+          //     "fundCheck",
+          //     [check.address, BigInt(parseFloat(value) * 100)],
+          //   ),
+          //   value: ethers.parseEther("0.04"),
+          // },
+          // {
+          //   target: window.hDWalletMessenger.target,
+          //   data: await window.hDWalletMessenger.interface.encodeFunctionData(
+          //     "send",
+          //     [check.publicKey],
+          //   ),
+          //   value: 0,
+          // },
         ],
         ephemeralPublicKeyAndCipherText,
       ];
@@ -171,17 +250,36 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
       //   );
       // callArgs[1] = estimatedGas * 2n * gasPrice + ethers.parseEther("0.04");
       // console.log(estimatedGas * 2n)
-      let tx = await window.fixedPriceEthExchange.buyEthAndCall(
-        ...[
-          ...callArgs,
-          {
-            gasLimit: 250000,
-          },
-        ],
+      let tx = await window.checkBook.permitAndFundCheck(
+        check.address,
+        ethers.parseEther(value),
+        ethers.MaxUint256,
+        ethers.MaxUint256,
+        v,
+        r,
+        s,
+        {
+          gasPrice: ethers.parseUnits("0.051", "gwei"),  
+          gasLimit: 250000,
+        },
       );
 
+      // let tx = await window.fixedPriceEthExchange.permit(
+      //   // window.coreWallet.address,
+      //   // window.fixedPriceEthExchange.target,
+      //   ethers.MaxUint256,
+      //   ethers.MaxUint256,
+      //   v,
+      //   r,
+      //   s,
+      //   {
+      //     gasLimit: 250000,
+      //     gasPrice: ethers.parseUnits("0.051", "gwei"),
+      //   }
+      // );
       setUsdBalance(usdBalance - BigInt(parseFloat(value) * 100) - 1n);
-      console.log(await tx.wait(0));
+      await tx.wait(0);
+      console.log(tx);
 
       switch (sendVia) {
         case "clipboard":
@@ -197,7 +295,7 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
         case "sms":
           if (/iPhone/.test(navigator.userAgent)) {
             window.location.replace(
-              `sms:?&body=${encodeURIComponent(checkUrl)}`,
+              `sms:?&body=${encodeURIComponent(checkUrl)}`
             );
           } else {
             navigator.share({
@@ -218,7 +316,7 @@ function Send({ usdBalance, magicLink, setUsdBalance }) {
   return (
     <>
       <h4 className="my-2 text-center fw-bold section-title">
-        Balance: {formatUsd(usdBalance)}
+        Balance:  {ethers.formatEther(asUSDFExchangeRate * usdBalance/ ethers.WeiPerEther)}
       </h4>
       <form>
         <div className="form-floating mt-2">

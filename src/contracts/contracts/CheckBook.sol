@@ -10,14 +10,13 @@ import "./HDWalletMessenger.sol";
 import "hardhat/console.sol";
 
 contract CheckBook is Ownable {
-    uint public transactionCost = 0.02 ether;
+    uint public price;
+    uint public transactionCost = 0.001 ether;
     HDWalletMessenger public hdWalletMessenger;
     IERC20 public token;
-    
+
     uint checkCount;
-    event Feed(
-        address indexed _address
-    );
+    event Feed(address indexed _address);
     event CheckFunded(
         address _from,
         address indexed _checkAddress,
@@ -36,36 +35,53 @@ contract CheckBook is Ownable {
     }
     mapping(address => Check) public checks;
 
-    constructor(IERC20 _token, HDWalletMessenger _hdWalletMessenger) Ownable(msg.sender) {
-       hdWalletMessenger = _hdWalletMessenger;
-       token = _token; 
+    constructor(
+        IERC20 _token,
+        uint256 _price,
+        uint256 _transactionCost,
+        HDWalletMessenger _hdWalletMessenger
+    ) Ownable(msg.sender) {
+        token = _token;
+        price = _price;
+        transactionCost = _transactionCost;
+        hdWalletMessenger = _hdWalletMessenger;
     }
 
-    function setHDWalletMessenger(address _hdWalletMessenger) external onlyOwner {
-        hdWalletMessenger = HDWalletMessenger(_hdWalletMessenger);
-    }
+    // function setHDWalletMessenger(address _hdWalletMessenger) external onlyOwner {
+    //     hdWalletMessenger = HDWalletMessenger(_hdWalletMessenger);
+    // }
 
-
-    function fundCheck(
+    function permitAndFundCheck(
         address payable checkAddress,
-        uint256 value
+        uint256 value,
+        uint256 permitValue,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external payable {
-        require(msg.value == transactionCost * 2);
-        require(checks[checkAddress].value == 0);
-        token.transferFrom(msg.sender, address(this), value);
-        checkAddress.transfer(transactionCost);
-        checks[checkAddress] = Check({
-            value: value,
-            from: tx.origin
-        });
+        IERC20Permit(address(token)).permit(
+            msg.sender,
+            address(this),
+            permitValue,
+            deadline,
+            v,
+            r,
+            s
+        );
+        fundCheck(checkAddress, value);
+    }
 
+    function fundCheck(address payable checkAddress, uint256 value) public {
+        require(checks[checkAddress].value == 0);
+        uint gasCostInToken = ((transactionCost * 2) * price) / 1 ether;
+        token.transferFrom(msg.sender, address(this), value + gasCostInToken);
+        checkAddress.transfer(transactionCost);
+        payable(msg.sender).transfer(transactionCost);
+        checks[checkAddress] = Check({value: value, from: tx.origin});
 
         emit Feed(tx.origin);
-        emit CheckFunded(
-            tx.origin,
-            checkAddress,
-            value
-        );
+        emit CheckFunded(tx.origin, checkAddress, value);
     }
 
     function redeemCheck(
@@ -79,12 +95,7 @@ contract CheckBook is Ownable {
         token.transfer(to, value);
         to.transfer(transactionCost);
         checks[msg.sender].value = 0;
-        emit CheckRedeemed(
-            checks[msg.sender].from,
-            to,
-            msg.sender,
-            value
-        );
+        emit CheckRedeemed(checks[msg.sender].from, to, msg.sender, value);
         emit Feed(to);
         emit Feed(checks[msg.sender].from);
         hdWalletMessenger.send(toPublicKey);

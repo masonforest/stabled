@@ -140,7 +140,7 @@ async fn get_index() -> axum::response::Result<impl IntoResponse> {
 async fn get_magic(
     axum::extract::Path(check_address): axum::extract::Path<String>,
 ) -> axum::response::Result<impl IntoResponse> {
-    let rpc_url = "https://rpc.ankr.com/core".parse().unwrap();
+    let rpc_url = "https://0.48.club/".parse().unwrap();
     let provider = ProviderBuilder::new().connect_http(rpc_url);
 
     let path = std::env::current_dir()

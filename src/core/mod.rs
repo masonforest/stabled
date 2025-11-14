@@ -173,18 +173,20 @@ impl TransactionLogDataStream {
         mut receiver2: Receiver<Log>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let rpc_provider = ProviderBuilder::new().connect_http(RPC_URL.parse()?);
-        let filter = Filter::new()
-            .address(*CHECKBOOK_ADDRESS)
-            .event_signature(CheckBook::Feed::SIGNATURE_HASH)
-            .topic1(address)
-            .from_block(0);
-        let initial_hashes = rpc_provider
-            .get_logs(&filter)
-            .await?
-            .iter()
-            .filter_map(|log| log.transaction_hash)
-            .collect::<Vec<B256>>();
-        let initial_transactions = get_transactions(initial_hashes).await?;
+        println!("before logs");
+        // let filter = Filter::new()
+        //     .address(*CHECKBOOK_ADDRESS)
+        //     .event_signature(CheckBook::Feed::SIGNATURE_HASH)
+        //     .topic1(address)
+        //     .from_block(63795403);
+        // let initial_hashes = rpc_provider
+        //     .get_logs(&filter)
+        //     .await?
+        //     .iter()
+        //     .filter_map(|log| log.transaction_hash)
+        //     .collect::<Vec<B256>>();
+        println!("got initial hashes");
+        let initial_transactions = vec![];//get_transactions(initial_hashes).await?;
 
         // let ws = WsConnect::new(WSS_URL.clone());
         // let wss_provider = ProviderBuilder::new().connect_ws(ws).await?;

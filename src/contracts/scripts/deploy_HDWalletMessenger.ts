@@ -1,13 +1,16 @@
-const hre = require("hardhat");
+import { network } from "hardhat";
 
+const { ethers } = await network.connect({
+  // network: "core",
+});
 async function main() {
-  [signer] = await ethers.getSigners();
-  const HDWalletMessenger = await hre.ethers.getContractFactory("HDWalletMessenger");
-  const { maxFeePerGas, maxPriorityFeePerGas } =
-    await hre.ethers.provider.getFeeData();
+  let [signer] = await ethers.getSigners();
+  const HDWalletMessenger = await ethers.getContractFactory("HDWalletMessenger");
+  // const { maxFeePerGas, maxPriorityFeePerGas } =
+  //   await ethers.provider.getFeeData();
   const hDWalletMessenger = await HDWalletMessenger.deploy({
-    maxFeePerGas,
-    maxPriorityFeePerGas,
+    // maxFeePerGas,
+    // maxPriorityFeePerGas,
   });
   await hDWalletMessenger.waitForDeployment();
   console.log(hDWalletMessenger.target)

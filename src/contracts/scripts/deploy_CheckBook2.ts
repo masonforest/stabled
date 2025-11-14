@@ -4,28 +4,22 @@ const { ethers } = await network.connect({
   // network: "core",
 });
 
-
 async function main() {
   let [signer] = await ethers.getSigners();
-  const HDWalletMessenger = await ethers.getContractFactory("HDWalletMessenger");
-  const hDWalletMessenger = await HDWalletMessenger.attach(
-    "0xe35FCA78813F21a5a3abEf96e2e71A9d0bc059AC",
-  );
   let initialPrice = ethers.parseEther("1097");
-  let transactionCost = ethers.parseEther("0.000007");
-  const CheckBook = await ethers.getContractFactory("CheckBook");
+  const CheckBook = await ethers.getContractFactory("CheckBook2");
   const { maxFeePerGas, maxPriorityFeePerGas } =
     await ethers.provider.getFeeData();
   const checkBook = await CheckBook.deploy(
     "0x917af46b3c3c6e1bb7286b9f59637fb7c65851fb",
     initialPrice,
-    transactionCost,
-    hDWalletMessenger.target, {
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-  });
+    {
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+    }
+  );
   await checkBook.waitForDeployment();
-  console.log(checkBook.target)
+  console.log(checkBook.target);
   // let tx = await bbUSD.preApprove(checkBook.target, {
   //   maxFeePerGas,
   //   maxPriorityFeePerGas,
@@ -39,7 +33,7 @@ async function main() {
   // });
   // console.log("tx2")
   // console.log(tx2.hash);
-  // console.log(tx.hash)
+  // console.log(tx.hash);
 
   console.log(checkBook.target);
 }

@@ -49,39 +49,26 @@ const signPermitV4 = async function ({ signer, tokenAddress, spender }) {
     s,
   };
 };
-
-describe("CheckBook", function () {
-  let erc20Permit: any, checkBook: any, owner: any, alice: any, bob: any;
+describe("CheckBook2", function () {
+  let erc20Permit: any, checkBook2: any, owner: any, alice: any, bob: any;
 
   beforeEach(async function () {
+      let initialPrice = ethers.parseEther("1000");
     [owner, alice, bob] = await ethers.getSigners();
 
-    let initialPrice = ethers.parseEther("1000");
-    let transactionCost = ethers.parseEther("0.1");
     const ERC20Permit = await ethers.getContractFactory("MockERC20Permit");
-    // erc20Permit = await Erc20Permit.deploy();
-    //     const ERC20Permit = await ethers.getContractFactory("MockERC20Permit");
     erc20Permit = await ERC20Permit.deploy("MockToken", "MTK", 0n);
-    const CheckBook = await ethers.getContractFactory("CheckBook");
-    const HDWalletMessenger =
-    await ethers.getContractFactory("HDWalletMessenger");
-  let hDWalletMessenger = await HDWalletMessenger.deploy();
-    checkBook = await CheckBook.deploy(
+    const CheckBook2 = await ethers.getContractFactory("CheckBook2");
+    checkBook2 = await CheckBook2.deploy(
       erc20Permit.target,
-      initialPrice,
-      transactionCost,
-      hDWalletMessenger.target,
+      initialPrice
     );
-    await owner.sendTransaction({
-    to: checkBook.target,
-    value: transactionCost * 3n,
-  });
   });
 
   describe("fund and redeem check", function () {
     it("allows for transferring", async function () {
-      await erc20Permit.mint(alice, ethers.MaxInt256);
-      // await erc20Permit.connect(alice).approve(checkBook.target, ethers.MaxUint256);
+      await erc20Permit.mint(alice, ethers.parseEther("100"));
+      // await erc20Permit.connect(alice).approve(checkBook2.target, ethers.MaxUint256);
       let check = ethers.Wallet.createRandom(ethers.provider);
       const userEthBalanceBefore = await ethers.provider.getBalance(
         alice.address,
@@ -89,11 +76,12 @@ describe("CheckBook", function () {
       const {v, r, s} = await signPermitV4({
         signer: alice,
         tokenAddress: erc20Permit.target,
-        spender: checkBook.target,
+        spender: checkBook2.target,
       });
-      await checkBook
+      const userTokenBalanceBefore = await erc20Permit.balanceOf(alice.address);
+      await checkBook2
         .connect(alice)
-        .permitAndFundCheck(
+        .permitAndTransferTokensAndEth(
           check.address,
           100,
           ethers.MaxUint256,
@@ -101,29 +89,31 @@ describe("CheckBook", function () {
           v,
           r,
           s,
-          {
+        {
+          value: ethers.parseEther("0.04"),
           gasPrice:  ethers.parseUnits("5.1", "gwei"),
         },
       );
-      const userEthBalanceAfter = await ethers.provider.getBalance(
-        alice.address,
+      const userTokenBalanceAfter = await erc20Permit.balanceOf(alice.address);
+      expect(userTokenBalanceBefore - userTokenBalanceAfter).to.equal(
+        20000000000000100n
       );
-      const gasCost = 83491175944587n;
-      console.log(ethers.formatEther(gasCost));
-      console.log(ethers.formatEther(ethers.parseEther("0.0002")));
-      console.log(ethers.formatEther(userEthBalanceBefore - userEthBalanceAfter));
-      expect(userEthBalanceAfter).to.be.gt(
-        userEthBalanceBefore,
+      // const userEthBalanceAfter = await ethers.provider.getBalance(
+      //   alice.address,
+      // );
+      // const gasCost = 83491175944587n;
+      // console.log(ethers.formatEther(gasCost));
+      // console.log(ethers.formatEther(ethers.parseEther("0.0002")));
+      // console.log(ethers.formatEther(userEthBalanceBefore - userEthBalanceAfter));
+      // expect(userEthBalanceAfter).to.equal(
+      //   userEthBalanceBefore - gasCost - ethers.parseEther("0.04"),
+      // );
+    //   await checkBook2.connect(check).redeemCheck(bob, new Uint8Array(), new Uint8Array());
+      expect(await erc20Permit.balanceOf(check.address)).to.eq(100);
+      const checkBalance = await ethers.provider.getBalance(
+         check.address,
       );
-      await checkBook.connect(check).redeemCheck(
-        bob,
-        new Uint8Array(),
-        new Uint8Array(),
-        {
-          gasPrice:  ethers.parseUnits("5.1", "gwei")
-        }
-      );
-      expect(await erc20Permit.balanceOf(bob)).to.eq(100);
+      expect(checkBalance).to.eq(ethers.parseEther("0.00001"));
     });
   });
 });
