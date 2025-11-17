@@ -126,6 +126,7 @@ function useInterval(callback, delay) {
 }
 
 function App() {
+  console.log("rendering app");
   // console.log((ethers.WeiPerEther * ethers.WeiPerEther) > ethers.MaxInt256)
   // console.log((ethers.WeiPerEther * ethers.WeiPerEther) ,  ethers.MaxInt256)
   // let initialPrice = ethers.parseEther("1173.91");

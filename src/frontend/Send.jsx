@@ -49,7 +49,7 @@ function SendViaButton({ sendVia, loading, checkUrl, onClick }) {
     case "x":
       label = "Send via X";
       break;
-    case "text":
+    case "sms":
       label = "Send via SMS";
       break;
     case "telegram":
@@ -173,6 +173,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
   const fundCheck = async (event) => {
     if (sendVia === "clipboard" || sendVia === "qr" || sendVia === "sms") {
       event.preventDefault();
+      console.log("preventing default");
     }
     setLoading(true);
     try {
@@ -295,6 +296,8 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
           break;
         case "sms":
           if (/iPhone/.test(navigator.userAgent)) {
+            console.log("going to")
+            console.log(`sms:?&body=${encodeURIComponent(checkUrl)}`)
             window.location.replace(
               `sms:?&body=${encodeURIComponent(checkUrl)}`
             );
@@ -327,7 +330,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
             value={sendVia}
             onChange={(e) => setSendVia(e.target.value)}
           >
-            <option value="text">SMS</option>
+            <option value="sms">SMS</option>
             <option value="x">X</option>
             <option value="telegram">Telegram</option>
             <option value="clipboard">Clipboard</option>
