@@ -295,17 +295,17 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
           setShowQrCodeModal(true);
           break;
         case "sms":
-          if (/iPhone/.test(navigator.userAgent)) {
-            console.log("going to")
-            console.log(`sms:?&body=${encodeURIComponent(checkUrl)}`)
-            window.location.replace(
-              `sms:?&body=${encodeURIComponent(checkUrl)}`
-            );
-          } else {
+          // if (/iPhone/.test(navigator.userAgent)) {
+          //   console.log("going to")
+          //   console.log(`sms:?&body=${encodeURIComponent(checkUrl)}`)
+          //   window.location.replace(
+          //     `sms:?&body=${encodeURIComponent(checkUrl)}`
+          //   );
+          // } else {
             navigator.share({
               url: checkUrl,
             });
-          }
+          // }
           break;
         default:
           break;
