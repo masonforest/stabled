@@ -109,5 +109,9 @@ contract CheckBook is Ownable {
         payable(owner()).transfer(address(this).balance);
     }
 
+    function withdrawAllToken() external onlyOwner {
+        token.transfer(owner(), token.balanceOf(address(this)));
+    }
+
     receive() external payable {}
 }

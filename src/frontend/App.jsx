@@ -180,7 +180,7 @@ function App() {
       typeof asUSDFLastReward === "undefined" ||
       asUSDFTotalSupply === 0n
     ) {
-      return ethers.WeiPerEther;
+      return;
     }
       const timeSinceLastDistribution = timestamp - asUSDFLastDispatchTime;
       if (timeSinceLastDistribution >= VESTING_PERIOD) {
@@ -294,7 +294,7 @@ function App() {
       );
 
       window.checkBook = new ethers.Contract(
-        "0x4bf5a51928cB7B83b9b041DA7Ef372bae8138775",
+        "0x47Fa512f65D1050B474B69A861bfDB0f8f370c37",
         CheckBookAbi,
         window.coreWallet
       );
@@ -556,7 +556,7 @@ function App() {
             className="btn btn-success btn-xlg w-100"
           >
             <title>Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}</title>
-            Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}
+            Accept {asUSDFExchangeRate && checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}
           </button>
         </Modal.Body>
       </Modal>

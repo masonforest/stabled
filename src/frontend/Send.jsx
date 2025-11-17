@@ -185,7 +185,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
         ethers.getBytes(check.publicKey),
         new TextEncoder().encode(memo || "")
       );
-      let transferValue = BigInt(parseFloat(value) * 100);
+      // let transferValue = BigInt(parseFloat(value) * 100);
       const { gasPrice } = await window.coreWallet.provider.getFeeData();
 
       const { v, r, s } = await signPermitV4({
@@ -220,7 +220,8 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
               [
                 window.coreWallet.address,
                 window.fixedPriceEthExchange.target,
-                BigInt(parseFloat(value) * 100),
+                0n
+                // BigInt(parseFloat(value) * 100),
               ],
             ),
             value: 0,
@@ -277,7 +278,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
       //     gasPrice: ethers.parseUnits("0.051", "gwei"),
       //   }
       // );
-      setUsdBalance(usdBalance - BigInt(parseFloat(value) * 100) - 1n);
+      setUsdBalance(usdBalance - ethers.parseEther(value) - 1n);
       await tx.wait(0);
       console.log(tx);
 
@@ -316,7 +317,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
   return (
     <>
       <h4 className="my-2 text-center fw-bold section-title">
-        Balance:  {ethers.formatEther(asUSDFExchangeRate * usdBalance/ ethers.WeiPerEther)}
+        Balance:  {asUSDFExchangeRate && ethers.formatEther(asUSDFExchangeRate * usdBalance/ ethers.WeiPerEther)}
       </h4>
       <form>
         <div className="form-floating mt-2">

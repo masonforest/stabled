@@ -7,7 +7,7 @@ export default defineConfig(({ command }) => {
   plugins: [react()],
   root: "./src/frontend",
   server: {
-    allowedHosts: ["44b3dfd43313.ngrok-free.app"],
+    allowedHosts: ["7385d01217c4.ngrok-free.app"],
     proxy: {
       '/sse': {
         target: 'http://localhost',

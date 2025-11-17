@@ -11,8 +11,8 @@ async function main() {
   const hDWalletMessenger = await HDWalletMessenger.attach(
     "0xe35FCA78813F21a5a3abEf96e2e71A9d0bc059AC",
   );
-  let initialPrice = ethers.parseEther("1097");
-  let transactionCost = ethers.parseEther("0.000007");
+  let initialPrice = ethers.parseEther("876");
+  let transactionCost = ethers.parseEther("0.000008");
   const CheckBook = await ethers.getContractFactory("CheckBook");
   const { maxFeePerGas, maxPriorityFeePerGas } =
     await ethers.provider.getFeeData();
