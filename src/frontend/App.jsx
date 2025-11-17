@@ -180,7 +180,7 @@ function App() {
       typeof asUSDFLastReward === "undefined" ||
       asUSDFTotalSupply === 0n
     ) {
-      return;
+      return undefined;
     }
       const timeSinceLastDistribution = timestamp - asUSDFLastDispatchTime;
       if (timeSinceLastDistribution >= VESTING_PERIOD) {
@@ -448,8 +448,8 @@ function App() {
     [usdBalance, checkMemo]
   );
   const isLoading = useMemo(
-    () => [usdBalance].some((value) => typeof value === "undefined"),
-    [usdBalance]
+    () => [usdBalance, asUSDFExchangeRate].some((value) => typeof value === "undefined"),
+    [usdBalance, asUSDFExchangeRate]
   );
   return isLoading ? (
     <Loading></Loading>
@@ -556,7 +556,7 @@ function App() {
             className="btn btn-success btn-xlg w-100"
           >
             <title>Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}</title>
-            Accept {asUSDFExchangeRate && checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}
+            Accept {checkBalance && ethers.formatEther(checkBalance * asUSDFExchangeRate/ ethers.WeiPerEther)}
           </button>
         </Modal.Body>
       </Modal>
