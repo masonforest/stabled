@@ -78,16 +78,14 @@ function SendViaButton({ sendVia, loading, checkUrl, onClick }) {
           role="status"
           aria-hidden="true"
         />
-      ) : (
-        label
-      )}
+      ) : <>Generate Link and Share</>}
     </a>
   );
 }
 function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
   const [checkSeed, setCheckSeed] = useState(null);
-  const [sendVia, setSendVia] = useState("clipboard");
+  const [sendVia, setSendVia] = useState("sms");
   const [loading, setLoading] = useState(false);
 
   const [value, setValue] = useState(import.meta.env.DEV ? "0.01" : null);
@@ -324,21 +322,6 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
       </h4>
       <form>
         <div className="form-floating mt-2">
-          <Form.Select
-            className="form-control rounded-3"
-            id="sendViaSelect"
-            value={sendVia}
-            onChange={(e) => setSendVia(e.target.value)}
-          >
-            <option value="sms">SMS</option>
-            <option value="x">X</option>
-            <option value="telegram">Telegram</option>
-            <option value="clipboard">Clipboard</option>
-            <option value="qr">QR Code</option>
-          </Form.Select>
-          <label htmlFor="sendViaSelect">Send Via</label>
-        </div>
-        <div className="form-floating mt-2">
           <input
             onChange={(event) => setValue(event.target.value)}
             value={value}
@@ -403,5 +386,20 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
     </>
   );
 }
+        // <div className="form-floating mt-2">
+        //   <Form.Select
+        //     className="form-control rounded-3"
+        //     id="sendViaSelect"
+        //     value={sendVia}
+        //     onChange={(e) => setSendVia(e.target.value)}
+        //   >
+        //     <option value="sms">SMS</option>
+        //     <option value="x">X</option>
+        //     <option value="telegram">Telegram</option>
+        //     <option value="clipboard">Clipboard</option>
+        //     <option value="qr">QR Code</option>
+        //   </Form.Select>
+        //   <label htmlFor="sendViaSelect">Send Via</label>
+        // </div>
 
 export default Send;

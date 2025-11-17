@@ -514,36 +514,6 @@ function App() {
               ></Transaction>
             );
           })}
-          <footer className="page-footer fixed-bottom border-top d-flex align-items-center">
-            <nav className="navbar navbar-expand p-0 flex-grow-1">
-              <div className="navbar-nav align-items-center justify-content-between w-100">
-                <Nav.Link eventKey="history">
-                  <div className="d-flex flex-column align-items-center">
-                    <div className="icon">
-                      <i className="bi bi-receipt"></i>
-                    </div>
-                    <div className="name">History</div>
-                  </div>
-                </Nav.Link>
-                <Nav.Link eventKey="magic-link">
-                  <div className="d-flex flex-column align-items-center">
-                    <div className="icon">
-                      <i className="bi bi-magic"></i>
-                    </div>
-                    <div className="name">Magic Link</div>
-                  </div>
-                </Nav.Link>
-                <Nav.Link eventKey="send">
-                  <div className="d-flex flex-column align-items-center">
-                    <div className="icon">
-                      <i className="bi bi-arrow-up-right-square"></i>
-                    </div>
-                    <div className="name">Send</div>
-                  </div>
-                </Nav.Link>
-              </div>
-            </nav>
-          </footer>
         </Tab.Container>
       </div>
 
@@ -605,4 +575,34 @@ function App() {
   );
 }
 
+          // <footer className="page-footer fixed-bottom border-top d-flex align-items-center">
+          //   <nav className="navbar navbar-expand p-0 flex-grow-1">
+          //     <div className="navbar-nav align-items-center justify-content-between w-100">
+          //       <Nav.Link eventKey="history">
+          //         <div className="d-flex flex-column align-items-center">
+          //           <div className="icon">
+          //             <i className="bi bi-receipt"></i>
+          //           </div>
+          //           <div className="name">History</div>
+          //         </div>
+          //       </Nav.Link>
+          //       <Nav.Link eventKey="magic-link">
+          //         <div className="d-flex flex-column align-items-center">
+          //           <div className="icon">
+          //             <i className="bi bi-magic"></i>
+          //           </div>
+          //           <div className="name">Magic Link</div>
+          //         </div>
+          //       </Nav.Link>
+          //       <Nav.Link eventKey="send">
+          //         <div className="d-flex flex-column align-items-center">
+          //           <div className="icon">
+          //             <i className="bi bi-arrow-up-right-square"></i>
+          //           </div>
+          //           <div className="name">Send</div>
+          //         </div>
+          //       </Nav.Link>
+          //     </div>
+          //   </nav>
+          // </footer>
 export default App;
