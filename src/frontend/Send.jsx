@@ -171,6 +171,9 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
   const fundCheck = async (event) => {
     if (sendVia === "clipboard" || sendVia === "qr" || sendVia === "sms") {
       event.preventDefault();
+      navigator.share({
+        url: checkUrl,
+      });
       console.log("preventing default");
     }
     setLoading(true);
@@ -281,33 +284,33 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
       await tx.wait(0);
       console.log(tx);
 
-      switch (sendVia) {
-        case "clipboard":
-          setTimeout(() => {
-            navigator.clipboard.writeText(checkUrl);
-          }, 0);
-          break;
-        case "telegram":
-          break;
-        case "qr":
-          setShowQrCodeModal(true);
-          break;
-        case "sms":
-          // if (/iPhone/.test(navigator.userAgent)) {
-          //   console.log("going to")
-          //   console.log(`sms:?&body=${encodeURIComponent(checkUrl)}`)
-          //   window.location.replace(
-          //     `sms:?&body=${encodeURIComponent(checkUrl)}`
-          //   );
-          // } else {
-            navigator.share({
-              url: checkUrl,
-            });
-          // }
-          break;
-        default:
-          break;
-      }
+      // switch (sendVia) {
+      //   case "clipboard":
+      //     setTimeout(() => {
+      //       navigator.clipboard.writeText(checkUrl);
+      //     }, 0);
+      //     break;
+      //   case "telegram":
+      //     break;
+      //   case "qr":
+      //     setShowQrCodeModal(true);
+      //     break;
+      //   case "sms":
+      //     // if (/iPhone/.test(navigator.userAgent)) {
+      //     //   console.log("going to")
+      //     //   console.log(`sms:?&body=${encodeURIComponent(checkUrl)}`)
+      //     //   window.location.replace(
+      //     //     `sms:?&body=${encodeURIComponent(checkUrl)}`
+      //     //   );
+      //     // } else {
+      //       navigator.share({
+      //         url: checkUrl,
+      //       });
+      //     // }
+      //     break;
+      //   default:
+      //     break;
+      // }
       setValue("");
       setMemo("");
     } finally {
