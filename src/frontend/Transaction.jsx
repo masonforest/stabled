@@ -18,11 +18,6 @@ function formatUsd(value) {
 }
 function decryptForSender(messageIndex, recipientPublicKey, encryptedMessage) {
   try {
-    // console.log({
-    //   messageIndex,
-    //   pub: ethers.hexlify(recipientPublicKey), 
-    //   mes: ethers.hexlify(encryptedMessage)})
-    // return <div>test</div>
     const ephemeralPrivateKey = getEphemeralPrivateKey(messageIndex, messageIndex)
     const ephemeralPublicKey = encryptedMessage.slice(0, 33);
     const nonce = ephemeralPublicKey.slice(0, 24);
@@ -37,17 +32,20 @@ function decryptForSender(messageIndex, recipientPublicKey, encryptedMessage) {
       xchacha20poly1305(key, nonce).decrypt(ciphertext),
     );
   } catch (e) {
+    // console.log(e)
     return "";
   }
 }
 
 function decryptForRecipient(privateKey, encryptedMessage) {
-  // console.log(Buffer.from(privateKey).toString("hex"), Buffer.from(encryptedMessage).toString("hex"))
+  console.log("encryptedMessage:", encryptedMessage)
+  console.log("privateKey:", privateKey)
   const ephemeralPublicKey = encryptedMessage.slice(0, 33);
   const nonce = ephemeralPublicKey.slice(0,24);
   const ciphertext = encryptedMessage.slice(33);
   const secret = secp.getSharedSecret(privateKey, ephemeralPublicKey, true);
   const key = secret.slice(0, 32);
+  console.log("xxx")
   return new TextDecoder().decode(xchacha20poly1305(key, nonce).decrypt(ciphertext));
 }
 
@@ -65,12 +63,13 @@ function getEphemeralPrivateKey(accountId, messageIndex) {
 
 function message (transaction) {
   switch(transaction.action) {
+
     case 'CheckFunded':
-      return <><div>You sent <span style={{color: "red"}}>{formatUsd(BigInt(transaction.amount))}</span> {transaction.redeemed ? null :<span style={{color: "grey"}}>(Pending)</span>}</div>
+      return <><div>You sent <span style={{color: "red"}}>${ethers.formatEther(BigInt(transaction.amount))}</span> {transaction.redeemed ? null :<span style={{color: "grey"}}>(Pending)</span>}</div>
       {decryptForSender(transaction.messageIndex, ethers.getBytes(transaction.toPublicKey), ethers.getBytes(transaction.encryptedMemo))}
       </>
     case 'CheckRedeemed':
-      return <><div>You received <span style={{color: "green"}}>{formatUsd(BigInt(transaction.amount))}</span></div>
+      return <><div>You received <span style={{color: "green"}}>${ethers.formatEther(BigInt(transaction.amount))}</span></div>
       {decryptForRecipient(ethers.getBytes(window.coreWallet.privateKey), ethers.getBytes(transaction.encryptedMemo))}
       </>
     default:
@@ -90,7 +89,7 @@ function Transaction({ transaction }) {
           <a
             target="_blank"
             rel="noopener noreferrer"
-            href={`https://scan.coredao.org/tx/${transaction.transactionHash}`}
+            href={`https://bscscan.com/tx/${transaction.transactionHash}`}
             className="text-decoration-none text-nowrap flex-shrink-0" /* Prevent wrapping */
             style={{ color: '#0d6efd' }} /* Optional: match Bootstrap primary color */
           >

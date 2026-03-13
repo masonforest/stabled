@@ -6,6 +6,7 @@ import { ethers } from "ethers";
 import { HDNodeWallet } from "ethers/wallet";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useMemo, useState } from "react";
+import CheckBookAbi from "./abi/contracts/CheckBook.sol/CheckBook.json";
 import { Spinner } from "react-bootstrap";
 import Form from "react-bootstrap/Form";
 import Modal from "react-bootstrap/Modal";
@@ -82,7 +83,7 @@ function SendViaButton({ sendVia, loading, checkUrl, onClick }) {
     </a>
   );
 }
-function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
+function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate, onSent, addTransaction }) {
   const [showQrCodeModal, setShowQrCodeModal] = useState(false);
   const [checkSeed, setCheckSeed] = useState(null);
   const [sendVia, setSendVia] = useState("sms");
@@ -178,15 +179,16 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
     }
     setLoading(true);
     try {
-      let messageIndex =
-        (await window.hDWalletMessenger.messageIndecies(
-          window.coreWallet.address
-        )) + 1n;
+      let messageIndex = await window.checkBook.messageIndecies(
+        window.coreWallet.address
+      );
+      console.log("messageIndex:", messageIndex)
       let ephemeralPublicKeyAndCipherText = await encrypt(
         messageIndex,
         ethers.getBytes(check.publicKey),
         new TextEncoder().encode(memo || "")
       );
+      console.log("ephemeralPublicKeyAndCipherText:", ephemeralPublicKeyAndCipherText);
       // let transferValue = BigInt(parseFloat(value) * 100);
       const { gasPrice } = await window.coreWallet.provider.getFeeData();
 
@@ -253,9 +255,22 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
       //   );
       // callArgs[1] = estimatedGas * 2n * gasPrice + ethers.parseEther("0.04");
       // console.log(estimatedGas * 2n)
-      let tx = await window.checkBook.permitAndFundCheck(
+          const coreProvider = new ethers.JsonRpcProvider("https://rpc-bsc.48.club");
+   const wallet = ethers.Wallet.fromPhrase(
+      window.localStorage.mnemonic,
+      coreProvider,
+    );
+          const checkBook = new ethers.Contract(
+        "0x7cD3E1CE78228F997543DB564689c7c77055053d",
+        CheckBookAbi,
+        wallet,
+      );
+
+      let tx = await checkBook.permitAndFundCheck(
         check.address,
         ethers.parseEther(value),
+        check.publicKey,
+        ephemeralPublicKeyAndCipherText,
         ethers.MaxUint256,
         ethers.MaxUint256,
         v,
@@ -263,7 +278,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
         s,
         {
           gasPrice: ethers.parseUnits("0.051", "gwei"),  
-          gasLimit: 250000,
+          gasLimit: 500000,
         },
       );
 
@@ -283,6 +298,17 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate }) {
       setUsdBalance(usdBalance - ethers.parseEther(value) - 1n);
       await tx.wait(0);
       console.log(tx);
+      addTransaction({
+        action: "CheckFunded",
+        from: tx.from,
+        transactionHash: tx.hash,
+        checkAddress: check.address,
+        messageIndex,
+        toPublicKey: ethers.getBytes(check.publicKey),
+        encryptedMemo: ephemeralPublicKeyAndCipherText,
+        amount: ethers.parseEther(value),
+      });
+      onSent?.();
 
       // switch (sendVia) {
       //   case "clipboard":
