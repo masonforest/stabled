@@ -31,6 +31,7 @@ import Loading from "./Loading";
 import Send from "./Send";
 import Transaction from "./Transaction";
 import SideNav from "./SideNav";
+import Auth from "./Auth";
 import * as bip39 from "@scure/bip39";
 // import { generatePrivateKey } from "viem/accounts";
 import { default as StableNetwork } from "./StableNetwork";
@@ -148,6 +149,7 @@ function useInterval(callback, delay) {
 
 function App() {
   // console.log("App rendered");
+  const [mnemonic, setMnemonic] = useState(localStorage.mnemonic || null);
   const [transactions, addTransaction] = useReducer((state, action) => {
     if (state.some((t) => t.transactionHash === action.transactionHash && t.action === action.action)) return state;
     if (action.action === "CheckRedeemed") {
@@ -280,6 +282,7 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (!localStorage.mnemonic) return;
     const coreProvider = new ethers.JsonRpcProvider("https://bsc-mainnet.public.blastapi.io");
     window.coreWallet = ethers.Wallet.fromPhrase(
       localStorage.mnemonic,
@@ -301,6 +304,7 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!localStorage.mnemonic) return;
     async function fetchData() {
       window.USDF = new ethers.Contract(
         "0x5a110fc00474038f6c02e89c707d638602ea44b5",
@@ -511,6 +515,9 @@ function App() {
       ),
     [usdBalance, asUSDFExchangeRate],
   );
+  if (!mnemonic) {
+    return <Auth onAuth={(m) => { localStorage.mnemonic = m; window.location.reload(); }} />;
+  }
   return isLoading ? (
     <Loading></Loading>
   ) : (
