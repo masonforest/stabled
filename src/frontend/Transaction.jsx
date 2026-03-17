@@ -38,14 +38,11 @@ function decryptForSender(messageIndex, recipientPublicKey, encryptedMessage) {
 }
 
 function decryptForRecipient(privateKey, encryptedMessage) {
-  console.log("encryptedMessage:", encryptedMessage)
-  console.log("privateKey:", privateKey)
   const ephemeralPublicKey = encryptedMessage.slice(0, 33);
   const nonce = ephemeralPublicKey.slice(0,24);
   const ciphertext = encryptedMessage.slice(33);
   const secret = secp.getSharedSecret(privateKey, ephemeralPublicKey, true);
   const key = secret.slice(0, 32);
-  console.log("xxx")
   return new TextDecoder().decode(xchacha20poly1305(key, nonce).decrypt(ciphertext));
 }
 

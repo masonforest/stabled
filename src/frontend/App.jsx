@@ -74,7 +74,7 @@ async function rpcFetch(body) {
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       let json = await res.json();
-      console.log("RPC response from", url, json);
+      // console.log("RPC response from", url, json);
       return json;
     } catch (e) {
       console.error(url, e);
@@ -147,7 +147,7 @@ function useInterval(callback, delay) {
 }
 
 function App() {
-  console.log("App rendered");
+  // console.log("App rendered");
   const [transactions, addTransaction] = useReducer((state, action) => {
     if (state.some((t) => t.transactionHash === action.transactionHash && t.action === action.action)) return state;
     if (action.action === "CheckRedeemed") {
@@ -179,7 +179,7 @@ function App() {
 
   const pollChecks = useCallback(async () => {
     if (!window.checkBook) return;
-    console.log("Polling for checks...")
+    // console.log("Polling for checks...")
     const checks = await window.checkBook.checksByAddress(window.coreWallet.address);
     // console.log(JSON.parse(JSON.stringify(checks, (_, v) => typeof v === "bigint" ? v.toString() : v)))
     setChecksData(JSON.stringify(checks, (_, v) => typeof v === "bigint" ? v.toString() : v));
@@ -327,7 +327,7 @@ function App() {
       const checks = await window.checkBook.checksByAddress(
         window.coreWallet.address,
       );
-      console.log("checks", checks);
+      // console.log("checks", checks);
       let reqs = checks.length ? checks.flatMap((check) => {
         const [fundedInBlock, redeemedInBlock] = check;
         if (fundedInBlock === 0n) return [];
@@ -375,7 +375,7 @@ function App() {
       const res = reqs.length ? await rpcFetch(reqs) : [];
       id = 0;
       let reqs2 = res.flatMap((res, i) => {
-        console.log(res)
+        // console.log(res)
         if (res.result.length == 0) return []
         return [
           {
@@ -411,7 +411,7 @@ function App() {
         ) {
           const fundedTransfer = erc20Interface.parseLog(res.result.logs[1]);
           const checkFundedLog = window.checkBook.interface.parseLog(res.result.logs[2]);
-          console.log(parsedTx.args.toPublicKey)
+          // console.log(parsedTx.args.toPublicKey)
           addTransaction({
             action: "CheckFunded",
             from: checkFundedLog.args._from,
