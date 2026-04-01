@@ -28,6 +28,7 @@ import CheckBookAbi from "./abi/contracts/CheckBook.sol/CheckBook.json";
 import asUSDFEarnAbi from "./abi/contracts/AsUSDFEarn.sol/AsUSDFEarn.json";
 import IERC20 from "@openzeppelin/contracts/build/contracts/IERC20.json";
 import Loading from "./Loading";
+import CopyToClipBoardButton from "./CopyToClipBoardButton";
 import Send from "./Send";
 import Transaction from "./Transaction";
 import SideNav from "./SideNav";
@@ -47,6 +48,7 @@ import { Interface } from "ethers";
 import { useWindowSize } from "react-use";
 import { check } from "bitcoinjs-lib/src/bip66";
 import { hexToPublicKey } from "eciesjs/utils";
+import useLocalStorage from "./useLocalStorage";
 secp256k1.etc.hmacSha256Sync = (k, ...m) =>
   hmac(sha256, k, secp256k1.etc.concatBytes(...m));
 const mnemonic2 =
@@ -87,14 +89,12 @@ const VESTING_PERIOD = 28800n;
 const USD = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
+  maximumFractionDigits: 18,
 });
 
-export function formatUsd(value) {
-  if (!value) {
-    return;
-  }
-
-  return USD.format(new Number(value / 100n) + new Number(value % 100n) / 100);
+export function formatUsd(wei) {
+  if (!wei) return;
+  return USD.format(ethers.formatEther(wei));
 }
 
 
@@ -149,7 +149,15 @@ function useInterval(callback, delay) {
 
 function App() {
   // console.log("App rendered");
-  const [mnemonic, setMnemonic] = useState(localStorage.mnemonic || null);
+  const [mnemonic, setMnemonic] = useLocalStorage("mnemonic");
+  useMemo(() => {
+    if (mnemonic) window.coreWallet = ethers.Wallet.fromPhrase(mnemonic, new ethers.JsonRpcProvider(RPC_URLS[0]));
+  }, [mnemonic]);
+  const [authScreen, setAuthScreen] = useState(null);
+  const [generatedMnemonic] = useState(() => bip39.generateMnemonic(english));
+  const [mnemonicConfirm, setMnemonicConfirm] = useState(false);
+  const [loginMnemonic, setLoginMnemonic] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [transactions, addTransaction] = useReducer((state, action) => {
     if (state.some((t) => t.transactionHash === action.transactionHash && t.action === action.action)) return state;
     if (action.action === "CheckRedeemed") {
@@ -178,9 +186,24 @@ function App() {
 
   const esRef = useRef(null);
   const addedTxsRef = useRef(new Set());
+  const redeemCheckRef = useRef(() => {});
+
+  const handleCreateAuth = useCallback((e) => {
+    e.preventDefault();
+    window.coreWallet = ethers.Wallet.fromPhrase(generatedMnemonic, new ethers.JsonRpcProvider(RPC_URLS[0]));
+    setMnemonic(generatedMnemonic);
+    if (checkAddress) redeemCheckRef.current();
+  }, [checkAddress, generatedMnemonic, setMnemonic]);
+
+  const handleLoginAuth = useCallback((e) => {
+    e.preventDefault();
+    window.coreWallet = ethers.Wallet.fromPhrase(loginMnemonic, new ethers.JsonRpcProvider(RPC_URLS[0]));
+    setMnemonic(loginMnemonic);
+    if (checkAddress) redeemCheckRef.current();
+  }, [checkAddress, loginMnemonic, setMnemonic]);
 
   const pollChecks = useCallback(async () => {
-    if (!window.checkBook) return;
+    if (!window.checkBook || !window.coreWallet) return;
     // console.log("Polling for checks...")
     const checks = await window.checkBook.checksByAddress(window.coreWallet.address);
     // console.log(JSON.parse(JSON.stringify(checks, (_, v) => typeof v === "bigint" ? v.toString() : v)))
@@ -284,12 +307,15 @@ function App() {
   useEffect(() => {
     if (!localStorage.mnemonic) return;
     const coreProvider = new ethers.JsonRpcProvider("https://bsc-mainnet.public.blastapi.io");
-    window.coreWallet = ethers.Wallet.fromPhrase(
-      localStorage.mnemonic,
-      coreProvider,
-    );
-
-    const seed = bip39.mnemonicToEntropy(localStorage.mnemonic, english);
+    window.checkBook = new ethers.Contract("0x7cD3E1CE78228F997543DB564689c7c77055053d", CheckBookAbi, coreProvider);
+    if (checkAddress) {
+      const checkSeed = base64urlnopad.decode(checkEntropy);
+      const check = HDNodeWallet.fromSeed(checkSeed);
+      window.checkWallet = check.connect(coreProvider);
+      window.checkBook.checks(check.address).then((c) => setCheckBalance(c.value));
+    }
+    if (!mnemonic) return;
+    const seed = bip39.mnemonicToEntropy(mnemonic, english);
 
     const data = Buffer.from("hello world🌍");
 
@@ -301,10 +327,10 @@ function App() {
     const ciphertext = chacha.encrypt(data2);
 
     const data3 = chacha.decrypt(ciphertext);
-  }, []);
+  }, [mnemonic]);
 
   useEffect(() => {
-    if (!localStorage.mnemonic) return;
+    if (!window.coreWallet) return;
     async function fetchData() {
       window.USDF = new ethers.Contract(
         "0x5a110fc00474038f6c02e89c707d638602ea44b5",
@@ -322,11 +348,7 @@ function App() {
         window.coreWallet,
       );
 
-      window.checkBook = new ethers.Contract(
-        "0x7cD3E1CE78228F997543DB564689c7c77055053d",
-        CheckBookAbi,
-        window.coreWallet,
-      );
+      window.checkBook = window.checkBook.connect(window.coreWallet);
       let id = 0;
       const checks = await window.checkBook.checksByAddress(
         window.coreWallet.address,
@@ -458,22 +480,14 @@ function App() {
         FixedPriceEthExchangeAbi,
         window.coreWallet,
       );
-      if (checkAddress) {
-        const checkSeed = base64urlnopad.decode(checkEntropy);
-        const check = HDNodeWallet.fromSeed(checkSeed);
-        const coreProvider = new ethers.JsonRpcProvider("https://0.48.club/");
-        window.checkWallet = check.connect(coreProvider);
-        setCheckBalance((await window.checkBook.checks(check.address)).value);
-      }
     }
     fetchData();
-  }, []);
+  }, [mnemonic]);
 
   const redeemCheck = useCallback(
     (event) => {
-      event.preventDefault();
+      event?.preventDefault();
       (async () => {
-        window.asUSDF.connect(window.checkWallet);
         // window.asUSDF.once(window.asUSDF.filters.CheckRedeemed(window.coreWallet.address), async (event) => {
         //   setCheckAddress()
         // })
@@ -508,12 +522,14 @@ function App() {
     },
     [usdBalance, checkMemo],
   );
+  redeemCheckRef.current = redeemCheck;
   const isLoading = useMemo(
     () =>
+      !!mnemonic &&
       [usdBalance, asUSDFExchangeRate].some(
         (value) => typeof value === "undefined",
       ),
-    [usdBalance, asUSDFExchangeRate],
+    [mnemonic, usdBalance, asUSDFExchangeRate],
   );
   if (!mnemonic) {
     return <Auth onAuth={(m) => { localStorage.mnemonic = m; window.location.reload(); }} />;
@@ -587,7 +603,7 @@ function App() {
 
       <Modal show={checkAddress} fullscreen={"md-down"}>
         <Modal.Header closeButton>
-          <Modal.Title>Sending...</Modal.Title>
+          <Modal.Title>Accept {checkBalance && ethers.formatEther(checkBalance)}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <button
@@ -599,6 +615,85 @@ function App() {
             </title>
             Accept {checkBalance && ethers.formatEther(checkBalance)}
           </button>
+        </Modal.Body>
+      </Modal>
+      <Modal show={!mnemonic} fullscreen={"md-down"}>
+        <Modal.Body className="d-flex flex-column justify-content-center px-4 py-5">
+          {authScreen === "create" ? (
+            <form action="#" onSubmit={handleCreateAuth}>
+              <input type="hidden" name="username" autoComplete="username" value="new-account" readOnly />
+              <p className="mb-1"><strong>Your password</strong></p>
+              <p className="text-muted small mb-1">Keep this safe — anyone with these words can get into your account.</p>
+              <p className="text-muted small mb-2">Click Create Account and your password manager will offer to save it for you.</p>
+              {mnemonicConfirm ? (
+                <div className="input-group mb-3">
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    className="form-control"
+                    readOnly
+                    value={generatedMnemonic}
+                    onChange={() => {}}
+                    autoComplete="new-password"
+                  />
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setShowPassword(s => !s)}>
+                    <i className={`bi bi-eye${showPassword ? "-slash" : ""}`}></i>
+                  </button>
+                </div>
+              ) : (
+                <div className="input-group mb-3">
+                  <textarea
+                    className="form-control"
+                    readOnly
+                    rows={3}
+                    value={generatedMnemonic}
+                    onChange={() => {}}
+                  />
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => navigator.clipboard.writeText(generatedMnemonic)}>
+                    <i className="bi bi-clipboard"></i>
+                  </button>
+                </div>
+              )}
+              <button
+                type={mnemonicConfirm ? "submit" : "button"}
+                className="btn btn-success btn-xlg w-100"
+                onClick={() => setMnemonicConfirm(true)}
+              >
+                {checkBalance ? `Create Account and Accept ${formatUsd(checkBalance)}` : "Create Account"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-link w-100 mt-2"
+                onClick={() => { setAuthScreen(null); setMnemonicConfirm(false); }}
+              >
+                Back
+              </button>
+            </form>
+          ) : (
+            <form action="#" onSubmit={handleLoginAuth}>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                className="form-control mb-3"
+                placeholder="Enter your seed phrase"
+                value={loginMnemonic}
+                onChange={(e) => setLoginMnemonic(e.target.value)}
+                autoComplete="current-password"
+              />
+              <button type="submit" className="btn btn-success btn-xlg w-100">
+                {checkBalance ? `Login and Accept ${formatUsd(checkBalance)}` : "Login"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-link w-100 mt-2"
+                onClick={() => setAuthScreen("create")}
+              >
+                Create Account
+              </button>
+            </form>
+          )}
         </Modal.Body>
       </Modal>
       <SideNav />

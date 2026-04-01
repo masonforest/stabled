@@ -16,7 +16,6 @@ const checkId = parseInt(window.location.pathname.slice(1));
 const isMagicLink = Number.isInteger(checkId);
 const checkEntropy = window.location.hash.slice(1);
 
-localStorage.mnemonic ||= ethers.Wallet.createRandom().mnemonic.phrase;
 
 function beginSliding(e) {
   slider.onpointermove = slide;

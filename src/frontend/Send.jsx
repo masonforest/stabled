@@ -347,7 +347,7 @@ function Send({ usdBalance, magicLink, setUsdBalance, asUSDFExchangeRate, onSent
   return (
     <>
       <h4 className="my-2 text-center fw-bold section-title">
-        Balance:  {asUSDFExchangeRate && ethers.formatEther(asUSDFExchangeRate * usdBalance/ ethers.WeiPerEther)}
+        {asUSDFExchangeRate && formatUsd(asUSDFExchangeRate * usdBalance / ethers.WeiPerEther)}
       </h4>
       <form>
         <div className="form-floating mt-2">
